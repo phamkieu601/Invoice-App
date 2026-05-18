@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/* Enable class-based dark mode for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.dark ::-webkit-scrollbar-thumb { background: #475569; }
+
+/* Print — show only #invoice-doc, hide everything else */
+@media print {
+  /* 1. Hide all body content */
+  body * { visibility: hidden !important; }
+
+  /* 2. Make invoice doc and its children visible */
+  #invoice-doc,
+  #invoice-doc * { visibility: visible !important; }
+
+  /* 3. Position invoice doc to fill the page */
+  #invoice-doc {
+    position: fixed !important;
+    inset: 0 !important;
+    margin: 0 !important;
+    padding: 16px !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    background: white !important;
+    border: none !important;
+    box-shadow: none !important;
+    z-index: 9999 !important;
+  }
+
+  /* 4. Reset page margins */
+  @page {
+    margin: 0;
+    size: A4;
+  }
+}
