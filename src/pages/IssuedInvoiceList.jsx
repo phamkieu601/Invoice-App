@@ -118,6 +118,7 @@ export default function IssuedInvoiceList() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.invoiceNo')}</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.customer')}</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.date')}</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.signedAt')}</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.total')}</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.status')}</th>
                   <th className="px-4 py-3 w-20" />
@@ -126,7 +127,7 @@ export default function IssuedInvoiceList() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={7} className="text-center py-16">
+                    <td colSpan={8} className="text-center py-16">
                       <Loader2 size={24} className="animate-spin mx-auto text-slate-400 mb-2" />
                       <p className="text-slate-400 text-sm">{t('issuedList.loading')}</p>
                     </td>
@@ -134,7 +135,7 @@ export default function IssuedInvoiceList() {
                 )}
                 {!loading && invoices.length === 0 && (
                   <tr>
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       <EmptyState
                         icon={FileText}
                         title={t('issuedList.empty')}
@@ -176,6 +177,11 @@ export default function IssuedInvoiceList() {
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
                       {inv.issue_date || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                      {inv.signed_at
+                        ? new Date(inv.signed_at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })
+                        : '—'}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">

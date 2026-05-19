@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Search, Eye, RefreshCw, Download, FileText, Activity, WifiOff, Settings, Database, X, ChevronRight, Send, CheckCircle2, Zap } from 'lucide-react'
+import BulkSignModal from '../components/invoice/BulkSignModal'
 import { getInvoiceLog } from '../services/invoiceService'
 import { useInvoiceStore } from '../store/invoiceStore'
 import { batchCheckInvoiceStatus, isViettelConfigured } from '../services/viettelService'
@@ -57,7 +58,7 @@ export default function InvoiceList() {
   const [viettelLoading, setViettelLoading] = useState(false)
   const [issuedMap, setIssuedMap] = useState(new Map())     // billingDoc → issued_invoices record
   const [checkedIds, setCheckedIds] = useState(new Set())   // sapBillingDoc strings
-  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [bulkSignOpen, setBulkSignOpen] = useState(false)
   const selectAllRef = useRef(null)
   const navigate = useNavigate()
 
@@ -145,10 +146,7 @@ export default function InvoiceList() {
 
   const startBulkIssue = () => {
     if (!checkedInvoices.length) return
-    const [first, ...rest] = checkedInvoices
-    setCheckedIds(new Set())
-    setBulkConfirm(false)
-    navigate(`/billing-preview/${first.sapBillingDoc}`, { state: { inv: first, bulkQueue: rest } })
+    setBulkSignOpen(true)
   }
 
 
@@ -459,7 +457,7 @@ export default function InvoiceList() {
                 Clear
               </button>
               <button
-                onClick={() => setBulkConfirm(true)}
+                onClick={startBulkIssue}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors"
               >
                 <Zap size={12} /> Issue {checkedIds.size} Invoice{checkedIds.size > 1 ? 's' : ''}
@@ -512,54 +510,17 @@ export default function InvoiceList() {
         )}
       </div>
 
-      {/* ── Bulk Issue Confirm Modal ────────────────────────────── */}
-      {bulkConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40" onClick={() => setBulkConfirm(false)} />
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-              <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
-                <Zap size={15} className="text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                  Issue {checkedInvoices.length} Invoice{checkedInvoices.length > 1 ? 's' : ''}
-                </div>
-                <div className="text-xs text-slate-400 mt-0.5">Invoices will be processed one by one in sequence</div>
-              </div>
-              <button onClick={() => setBulkConfirm(false)} className="ml-auto p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
-                <X size={15} />
-              </button>
-            </div>
-            <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
-              {checkedInvoices.map((inv, i) => (
-                <div key={inv.sapBillingDoc} className="flex items-center gap-3 px-6 py-3">
-                  <span className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 text-[10px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-mono font-semibold text-blue-600 dark:text-blue-400">{inv.sapBillingDoc}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{inv.customer?.name || '—'}</div>
-                  </div>
-                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 shrink-0">{fmt(getInvoiceTotal(inv), inv.currency)}</div>
-                </div>
-              ))}
-            </div>
-            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between gap-3">
-              <div className="text-xs text-slate-500">
-                Total: <span className="font-bold text-slate-800 dark:text-slate-200">{fmt(checkedTotal)}</span>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setBulkConfirm(false)}
-                  className="px-4 py-2 text-xs font-medium border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-                  Cancel
-                </button>
-                <button onClick={startBulkIssue}
-                  className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">
-                  <Zap size={12} /> Start Issuing
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* ── Bulk Sign Modal ──────────────────────────────────────── */}
+      {bulkSignOpen && (
+        <BulkSignModal
+          invoices={checkedInvoices}
+          onClose={() => setBulkSignOpen(false)}
+          onComplete={() => {
+            setBulkSignOpen(false)
+            setCheckedIds(new Set())
+            loadIssuedMap()
+          }}
+        />
       )}
 
       {/* ── Billing Detail Panel ─────────────────────────────────── */}
