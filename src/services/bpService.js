@@ -62,7 +62,7 @@ export async function getCustomer(customerId) {
     try {
       const data = await sapGet(
         `/sap/opu/odata/sap/API_BUSINESS_PARTNER/A_BusinessPartner('${id}')`,
-        { $expand: 'to_BusinessPartnerAddress' }
+        { $expand: 'to_BusinessPartnerAddress,to_BusinessPartnerAddress/to_EmailAddress,to_BusinessPartnerAddress/to_PhoneNumber' }
       )
       const bp = data?.d || {}
       console.debug('[bpService] BP data for', id, bp)

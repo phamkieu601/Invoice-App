@@ -202,6 +202,89 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
   )
 }
 
+// ── Mail Modal ─────────────────────────────────────────────────────────────
+function MailModal({ inv, total, taxAuthorityCode, seller, onClose }) {
+  const [to, setTo]   = useState(inv.customer?.email || '')
+  const [err, setErr] = useState('')
+
+  const subject = `Hóa đơn điện tử ${inv.sapBillingDoc} - ${seller.name}`
+  const body = [
+    `Kính gửi Quý khách hàng ${inv.customer?.name || ''},`,
+    '',
+    `Chúng tôi xin gửi hóa đơn giá trị gia tăng điện tử như sau:`,
+    `  - Số hóa đơn     : ${inv.sapBillingDoc}`,
+    `  - Ngày lập       : ${inv.issueDate || ''}`,
+    `  - Tổng tiền      : ${Number(total || 0).toLocaleString('vi-VN')} ${inv.currency || 'VND'}`,
+    `  - Mã cơ quan thuế: ${taxAuthorityCode}`,
+    '',
+    `Trân trọng,`,
+    seller.name,
+    seller.email || '',
+    seller.phone || '',
+  ].join('\n')
+
+  const handleSend = () => {
+    if (!to || !/\S+@\S+\.\S+/.test(to)) { setErr('Vui lòng nhập email hợp lệ'); return }
+    window.open(`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
+            <Mail size={18} className="text-white" />
+          </div>
+          <div>
+            <div className="text-white font-semibold text-sm">Gửi hóa đơn cho khách hàng</div>
+            <div className="text-blue-200 text-xs font-mono">{inv.sapBillingDoc}</div>
+          </div>
+          <button onClick={onClose} className="ml-auto text-white/70 hover:text-white text-xl leading-none">×</button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5 block">Email khách hàng</label>
+            <input
+              type="email"
+              value={to}
+              onChange={e => { setTo(e.target.value); setErr('') }}
+              placeholder="example@company.com"
+              className="w-full border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              autoFocus
+            />
+            {err && <div className="text-xs text-red-500 mt-1">{err}</div>}
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-3 text-xs space-y-1 text-slate-600 dark:text-slate-300">
+            <div><span className="font-semibold">Tiêu đề:</span> {subject}</div>
+            <div><span className="font-semibold">Khách hàng:</span> {inv.customer?.name || '—'}</div>
+            <div><span className="font-semibold">Số tiền:</span> {Number(total || 0).toLocaleString('vi-VN')} {inv.currency || 'VND'}</div>
+          </div>
+
+          <div className="text-[11px] text-slate-400 flex items-start gap-1.5">
+            <Paperclip size={11} className="shrink-0 mt-0.5" />
+            Sẽ mở ứng dụng mail mặc định với nội dung soạn sẵn. Đính kèm PDF thủ công nếu cần.
+          </div>
+        </div>
+
+        <div className="px-6 pb-5 flex gap-3 justify-end">
+          <button onClick={onClose}
+            className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer">
+            Hủy
+          </button>
+          <button onClick={handleSend}
+            className="px-5 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors flex items-center gap-2 cursor-pointer">
+            <Send size={14} /> Mở Mail
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────
 export default function BillingPreview() {
   const { billingDoc } = useParams()
@@ -231,6 +314,7 @@ export default function BillingPreview() {
   const addNotification = useNotificationStore(s => s.add)
 
   const [showSignModal, setShowSignModal] = useState(false)
+  const [showMailModal, setShowMailModal] = useState(false)
   const [issued, setIssued]               = useState(alreadyIssued)
   const [taxAuthorityCode]                = useState(
     location.state?.taxAuthorityCode ||
@@ -309,6 +393,11 @@ export default function BillingPreview() {
             {!issued && (
               <Button icon={ShieldCheck} size="sm" variant="success" onClick={() => setShowSignModal(true)}>
                 {t('preview.issue')}
+              </Button>
+            )}
+            {issued && (
+              <Button icon={Mail} size="sm" variant="secondary" onClick={() => setShowMailModal(true)}>
+                Send Email
               </Button>
             )}
             {issued && bulkQueue.length > 0 && (
@@ -541,6 +630,15 @@ export default function BillingPreview() {
         </div>
       </div>
 
+      {showMailModal && (
+        <MailModal
+          inv={inv}
+          total={total}
+          taxAuthorityCode={taxAuthorityCode}
+          seller={SELLER}
+          onClose={() => setShowMailModal(false)}
+        />
+      )}
       {showSignModal && (
         <SigningModal
           inv={inv}
