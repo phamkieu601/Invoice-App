@@ -10,44 +10,48 @@ const parseSAPDate = (val) => {
   return val
 }
 
-const mapDelivery = (d) => {
-  // SO reference: header field or first item's ReferenceSDDocument
-  const items = d.to_DeliveryDocumentItem?.results || []
-  const soRef = d.ReferenceSDDocument
-    || items.find(it => it.ReferenceSDDocument)?.ReferenceSDDocument
-    || ''
-
-  return {
-  deliveryDoc: d.DeliveryDocument,
-  deliveryDate: parseSAPDate(d.ActualGoodsMovementDate || d.PlannedGoodsIssueDate),
-  shipDate: parseSAPDate(d.PlannedGoodsIssueDate),
-  soldToParty: d.SoldToParty || '',
-  shipToParty: d.ShipToParty || '',
-  customerName: d.SoldToPartyName || d.SoldToParty || '',
-  soRef,
-  status: d.OverallSDProcessStatus === 'C' ? 'completed'
-    : d.OverallSDProcessStatus === 'B' ? 'partial'
-    : 'open',
-  totalWeight: parseFloat(d.TotalGrossWeight || 0),
-  weightUnit: d.WeightUnit || 'KG',
-  currency: d.TransactionCurrency || 'VND',
-  items: items.map((it, idx) => ({
-    id: idx + 1,
-    material: it.Material || '',
-    description: it.DeliveryDocumentItemText || it.Material || '',
-    qty: parseFloat(it.ActualDeliveryQuantity || it.DeliveryQuantity || 0),
-    unit: it.DeliveryQuantityUnit || 'EA',
-  })),
-  }
+function mapStatus(d) {
+  // OverallSDProcessStatus: ' '/''/'A' = open, 'B' = partial, 'C' = completed
+  const s = d.OverallSDProcessStatus || ''
+  if (s === 'C') return 'completed'
+  if (s === 'B') return 'partial'
+  // Fallback: check goods movement status
+  const g = d.OverallGoodsMovementStatus || ''
+  if (g === 'C') return 'completed'
+  if (g === 'B') return 'partial'
+  return 'open'
 }
+
+const mapDeliveryHeader = (d) => ({
+  deliveryDoc:  d.DeliveryDocument,
+  deliveryDate: parseSAPDate(d.ActualGoodsMovementDate || d.PlannedGoodsIssueDate),
+  shipDate:     parseSAPDate(d.PlannedGoodsIssueDate),
+  soldToParty:  d.SoldToParty || '',
+  shipToParty:  d.ShipToParty || '',
+  customerName: d.SoldToPartyName || d.SoldToParty || '',
+  soRef:        d.ReferenceSDDocument || '',
+  status:       mapStatus(d),
+  totalQty:     parseFloat(d.TotalNetWeight || 0),
+  currency:     d.TransactionCurrency || 'VND',
+  items:        null, // loaded lazily on expand
+})
+
+const mapItems = (results) =>
+  results.map((it, idx) => ({
+    id:          idx + 1,
+    material:    it.Material || '',
+    description: it.DeliveryDocumentItemText || it.Material || '',
+    qty:         parseFloat(it.ActualDeliveryQuantity || it.DeliveryQuantity || 0),
+    unit:        it.DeliveryQuantityUnit || 'EA',
+  }))
 
 export const getDeliveries = async ({ search = '', status = '' } = {}) => {
   const data = await sapGet('/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV/A_OutbDeliveryHeader', {
-    $expand: 'to_DeliveryDocumentItem',
-    $top: 50,
+    $top: 100,
     $orderby: 'PlannedGoodsIssueDate desc',
+    $select: 'DeliveryDocument,ReferenceSDDocument,SoldToParty,SoldToPartyName,ShipToParty,ActualGoodsMovementDate,PlannedGoodsIssueDate,OverallSDProcessStatus,OverallGoodsMovementStatus,TransactionCurrency,TotalNetWeight',
   })
-  let results = (data.d?.results || []).map(mapDelivery)
+  let results = (data.d?.results || []).map(mapDeliveryHeader)
   if (search) results = results.filter(d =>
     d.deliveryDoc.includes(search) ||
     d.customerName.toLowerCase().includes(search.toLowerCase()) ||
@@ -55,4 +59,12 @@ export const getDeliveries = async ({ search = '', status = '' } = {}) => {
   )
   if (status) results = results.filter(d => d.status === status)
   return results
+}
+
+export const getDeliveryItems = async (deliveryDoc) => {
+  const data = await sapGet(
+    `/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV/A_OutbDeliveryHeader('${deliveryDoc}')/to_DeliveryDocumentItem`,
+    { $select: 'DeliveryDocument,DeliveryDocumentItem,Material,DeliveryDocumentItemText,ActualDeliveryQuantity,DeliveryQuantity,DeliveryQuantityUnit' }
+  )
+  return mapItems(data.d?.results || [])
 }

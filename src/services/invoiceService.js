@@ -44,23 +44,27 @@ export const getInvoices = async ({ search = '', status = '', deliveryFilter = '
 
   let results = data.d.results.map(doc => mapSAPToLocal(doc))
 
-  // Enrich customer info from API_BUSINESS_PARTNER (SAP_COM_0008)
-  const customerIds = results.map(inv => inv.customer.code).filter(Boolean)
-  if (customerIds.length) {
-    const bpCache = await batchGetCustomers(customerIds)
+  // Enrich customer + bill-to info from API_BUSINESS_PARTNER (SAP_COM_0008)
+  const allBpIds = [...new Set([
+    ...results.map(inv => inv.customer.code),
+    ...results.map(inv => inv.payerCode),
+  ].filter(Boolean))]
+  if (allBpIds.length) {
+    const bpCache = await batchGetCustomers(allBpIds)
     results = results.map(inv => {
-      const bp = bpCache.get(inv.customer.code)
-      if (!bp) return inv
+      const bp      = bpCache.get(inv.customer.code)
+      const payerBp = bpCache.get(inv.payerCode)
       return {
         ...inv,
-        customer: {
+        payer: payerBp?.name || inv.payer,
+        customer: bp ? {
           ...inv.customer,
           name:    bp.name    || inv.customer.name,
           taxCode: bp.taxCode || inv.customer.taxCode,
           address: bp.address || inv.customer.address,
           phone:   bp.phone   || inv.customer.phone,
           email:   bp.email   || inv.customer.email,
-        },
+        } : inv.customer,
       }
     })
   }
@@ -213,6 +217,7 @@ const mapSAPToLocal = (doc) => {
   // SP = sold-to party (Auftraggeber in German), AG is the German code but SAP Public Cloud uses SP
   const partners = doc.to_Partner?.results || []
   const spPartner = partners.find(p => p.PartnerFunction === 'SP') || partners.find(p => p.PartnerFunction === 'AG') || {}
+  const rgPartner = partners.find(p => p.PartnerFunction === 'RG') || {}
 
   const addressParts = [].filter(Boolean)
 
@@ -230,6 +235,8 @@ const mapSAPToLocal = (doc) => {
     number: doc.BillingDocument,
     taxAuthorityCode: '',
     buyerName: spPartner.AddressPersonFullName || '',
+    payer: doc.PayerPartyName || rgPartner.AddressPersonFullName || rgPartner.PartnerName || '',
+    payerCode: doc.Payer || rgPartner.Customer || '',
     deliveryRef: doc.ReferenceSDDocument || doc.to_Item?.results?.[0]?.ReferenceSDDocument || '',
     totalNetAmount,
     totalTaxAmount,

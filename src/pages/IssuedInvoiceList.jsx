@@ -10,11 +10,13 @@ import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Pagination from '../components/ui/Pagination'
 import Topbar from '../components/layout/Topbar'
+import { useT } from '../i18n'
 
 const fmt = (n, currency = 'VND') => {
   const num = Number(n || 0)
   if (currency === 'USD') return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2 })
-  return num.toLocaleString('vi-VN') + ' ₫'
+  if (currency === 'EUR') return '€' + num.toLocaleString('de-DE', { minimumFractionDigits: 2 })
+  return num.toLocaleString('vi-VN') + ' ' + (currency || 'VND')
 }
 
 const fmtDate = iso => {
@@ -24,6 +26,7 @@ const fmtDate = iso => {
 
 export default function IssuedInvoiceList() {
   const navigate = useNavigate()
+  const t = useT()
   const [invoices, setInvoices]   = useState([])
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState(null)
@@ -51,26 +54,26 @@ export default function IssuedInvoiceList() {
   return (
     <div className="flex flex-col h-full">
       <Topbar
-        title="Danh sách hóa đơn"
-        subtitle="Hóa đơn điện tử đã ký số và gửi CQT · Lưu trữ Supabase"
+        title={t('issuedList.title')}
+        subtitle={t('issuedList.subtitle')}
         actions={
           <div className="flex items-center gap-2">
             {isSupabaseConfigured() ? (
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                  Supabase · issued_invoices
+                  {t('issuedList.supabaseBadge')}
                 </span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
                 <Database size={11} className="text-amber-500" />
-                <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Local Demo</span>
+                <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">{t('issuedList.demoBadge')}</span>
               </div>
             )}
             <Button size="sm" variant="outline" onClick={load} disabled={loading}>
               <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-              Làm mới
+              {t('issuedList.refresh')}
             </Button>
           </div>
         }
@@ -87,10 +90,7 @@ export default function IssuedInvoiceList() {
         {!isSupabaseConfigured() && (
           <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-amber-700 dark:text-amber-300 text-xs">
             <Database size={14} className="shrink-0" />
-            <span>
-              Chưa cấu hình Supabase — dữ liệu lưu tạm trong bộ nhớ (mất khi reload).
-              Vào <strong>Settings → SAP</strong> để nhập Supabase URL và Anon Key.
-            </span>
+            <span>{t('issuedList.noSupabase')}</span>
           </div>
         )}
 
@@ -101,12 +101,12 @@ export default function IssuedInvoiceList() {
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Tìm số billing doc, khách hàng, số HĐĐT..."
+                placeholder={t('issuedList.search')}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
-            <span className="text-xs text-slate-400">{invoices.length} hóa đơn</span>
+            <span className="text-xs text-slate-400">{t('issuedList.countLabel').replace('{n}', invoices.length)}</span>
           </div>
 
           {/* Table */}
@@ -114,22 +114,21 @@ export default function IssuedInvoiceList() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Billing Doc</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Số HĐĐT</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Khách hàng</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ngày ký</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Ngày HĐ</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tổng tiền</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Trạng thái</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.billingDoc')}</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.invoiceNo')}</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.customer')}</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.date')}</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.total')}</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.status')}</th>
                   <th className="px-4 py-3 w-20" />
                 </tr>
               </thead>
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={8} className="text-center py-16">
+                    <td colSpan={7} className="text-center py-16">
                       <Loader2 size={24} className="animate-spin mx-auto text-slate-400 mb-2" />
-                      <p className="text-slate-400 text-sm">Đang tải từ Supabase...</p>
+                      <p className="text-slate-400 text-sm">{t('issuedList.loading')}</p>
                     </td>
                   </tr>
                 )}
@@ -138,8 +137,8 @@ export default function IssuedInvoiceList() {
                     <td colSpan={8}>
                       <EmptyState
                         icon={FileText}
-                        title="Chưa có hóa đơn nào"
-                        description="Hóa đơn sẽ xuất hiện sau khi ký số và gửi CQT từ trang Billing Documents."
+                        title={t('issuedList.empty')}
+                        description={t('issuedList.emptyDesc')}
                       />
                     </td>
                   </tr>
@@ -154,12 +153,18 @@ export default function IssuedInvoiceList() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {inv.viettel_invoice_no
-                        ? <span className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                      {inv.viettel_invoice_no ? (
+                        <div>
+                          <span className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                             <CheckCircle2 size={11} /> {inv.viettel_invoice_no}
                           </span>
-                        : <span className="text-slate-400 text-xs">—</span>
-                      }
+                          {inv.viettel_series && (
+                            <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{inv.viettel_series}</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 text-xs">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
@@ -168,9 +173,6 @@ export default function IssuedInvoiceList() {
                       {inv.customer_tax_code && (
                         <div className="text-[10px] text-slate-400 mt-0.5">MST: {inv.customer_tax_code}</div>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-400">
-                      {fmtDate(inv.signed_at)}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
                       {inv.issue_date || '—'}
@@ -182,9 +184,9 @@ export default function IssuedInvoiceList() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       {inv.status === 'cancelled'
-                        ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">Đã hủy</span>
+                        ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('issuedList.status.cancelled')}</span>
                         : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
-                            <CheckCircle2 size={9} /> Đã phát hành
+                            <CheckCircle2 size={9} /> {t('issuedList.status.issued')}
                           </span>
                       }
                     </td>
@@ -214,7 +216,7 @@ export default function IssuedInvoiceList() {
                         })}
                         className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-700 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer"
                       >
-                        <Eye size={10} /> Xem
+                        <Eye size={10} /> {t('issuedList.view')}
                       </button>
                     </td>
                   </tr>

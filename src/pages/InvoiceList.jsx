@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Search, Eye, RefreshCw, Download, FileText, Activity, WifiOff, Settings, Database, Truck, X, ChevronRight, Send, CheckCircle2 } from 'lucide-react'
+import { Search, Eye, RefreshCw, Download, FileText, Activity, WifiOff, Settings, Database, X, ChevronRight, Send, CheckCircle2, Zap } from 'lucide-react'
 import { getInvoiceLog } from '../services/invoiceService'
 import { useInvoiceStore } from '../store/invoiceStore'
 import { batchCheckInvoiceStatus, isViettelConfigured } from '../services/viettelService'
+import { getIssuedInvoices } from '../services/issuedInvoiceService'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
@@ -54,6 +55,10 @@ export default function InvoiceList() {
   const [selectedInv, setSelectedInv] = useState(null)
   const [viettelMap, setViettelMap] = useState(new Map())   // billingDoc → { exists, invoiceNo, ... }
   const [viettelLoading, setViettelLoading] = useState(false)
+  const [issuedMap, setIssuedMap] = useState(new Map())     // billingDoc → issued_invoices record
+  const [checkedIds, setCheckedIds] = useState(new Set())   // sapBillingDoc strings
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const selectAllRef = useRef(null)
   const navigate = useNavigate()
 
   useEffect(() => { setPage(1) }, [search, activeTab])
@@ -70,6 +75,18 @@ export default function InvoiceList() {
       .finally(() => setViettelLoading(false))
   }, [invoices])
 
+  // Load danh sách đã phát hành HĐĐT từ Supabase (độc lập với invoices)
+  const loadIssuedMap = () => {
+    getIssuedInvoices({})
+      .then(list => {
+        const m = new Map()
+        list.forEach(r => { if (r.status !== 'cancelled') m.set(r.billing_doc, r) })
+        setIssuedMap(m)
+      })
+      .catch(() => {})
+  }
+  useEffect(() => { loadIssuedMap() }, [])
+
   const counts = {
     '': invoices.length,
     draft: invoices.filter(i => i.status === 'draft').length,
@@ -83,7 +100,56 @@ export default function InvoiceList() {
     .filter(i => i.status === 'issued')
     .reduce((s, inv) => s + getInvoiceTotal(inv), 0)
 
-  const doRefresh = () => fetchInvoices({ search, status: activeTab })
+  const doRefresh = () => { fetchInvoices({ search, status: activeTab }); loadIssuedMap() }
+
+  // Bulk selection helpers — only issuable (not cancelled, not already issued)
+  const issuableOnPage = pagedInvoices.filter(inv =>
+    inv.status !== 'cancelled' && !issuedMap.has(inv.sapBillingDoc)
+  )
+  const allPageChecked = issuableOnPage.length > 0 && issuableOnPage.every(inv => checkedIds.has(inv.sapBillingDoc))
+  const somePageChecked = issuableOnPage.some(inv => checkedIds.has(inv.sapBillingDoc))
+
+  // Sync indeterminate state on the select-all checkbox
+  useEffect(() => {
+    if (!selectAllRef.current) return
+    selectAllRef.current.indeterminate = somePageChecked && !allPageChecked
+  }, [somePageChecked, allPageChecked])
+
+  const toggleCheck = (id, e) => {
+    e.stopPropagation()
+    setCheckedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (allPageChecked) {
+      setCheckedIds(prev => {
+        const next = new Set(prev)
+        issuableOnPage.forEach(inv => next.delete(inv.sapBillingDoc))
+        return next
+      })
+    } else {
+      setCheckedIds(prev => {
+        const next = new Set(prev)
+        issuableOnPage.forEach(inv => next.add(inv.sapBillingDoc))
+        return next
+      })
+    }
+  }
+
+  const checkedInvoices = invoices.filter(inv => checkedIds.has(inv.sapBillingDoc))
+  const checkedTotal = checkedInvoices.reduce((s, inv) => s + getInvoiceTotal(inv), 0)
+
+  const startBulkIssue = () => {
+    if (!checkedInvoices.length) return
+    const [first, ...rest] = checkedInvoices
+    setCheckedIds(new Set())
+    setBulkConfirm(false)
+    navigate(`/billing-preview/${first.sapBillingDoc}`, { state: { inv: first, bulkQueue: rest } })
+  }
 
 
   return (
@@ -97,7 +163,7 @@ export default function InvoiceList() {
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                  Billing Document Integration · SAP_COM_0192
+                  SAP Live
                 </span>
               </div>
             ) : (
@@ -120,21 +186,21 @@ export default function InvoiceList() {
           <WifiOff size={16} className="text-red-400 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-red-700 dark:text-red-300">
-              Không thể tải Billing Documents từ SAP_COM_0192
+              {t('invoiceList.errorTitle')}
             </div>
             <div className="text-xs text-red-500 dark:text-red-400 mt-0.5">{error}</div>
             <div className="text-[11px] text-slate-400 font-mono mt-1 truncate">
-              {sapInfo.url || 'Chưa cấu hình Tenant URL'}{sapInfo.user ? ` · ${sapInfo.user}` : ''}
+              {sapInfo.url || t('invoiceList.notConfigured')}{sapInfo.user ? ` · ${sapInfo.user}` : ''}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={doRefresh}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-700 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors">
-              <RefreshCw size={11} /> Thử lại
+              <RefreshCw size={11} /> {t('invoiceList.retry')}
             </button>
             <button onClick={() => navigate('/settings/sap')}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors">
-              <Settings size={11} /> Cấu hình SAP
+              <Settings size={11} /> {t('invoiceList.configSap')}
             </button>
           </div>
         </div>
@@ -142,20 +208,34 @@ export default function InvoiceList() {
 
       <div className="flex-1 overflow-auto p-6 space-y-4">
         {/* Summary bar */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between">
-            <span className="text-xs text-slate-500 dark:text-slate-400">{t('invoiceList.totalInvoices')}</span>
-            <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{invoices.length}</span>
+        <div className="grid grid-cols-5 gap-3">
+          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.totalDocs')}</div>
+            <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{invoices.length}</div>
           </div>
-          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between">
-            <span className="text-xs text-slate-500 dark:text-slate-400">{t('invoiceList.issuedRevenue')}</span>
-            <span className="text-sm font-bold text-emerald-700 dark:text-emerald-400">{fmt(totalRevenue)}</span>
+          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.issued')}</div>
+            <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{issuedMap.size}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">/ {invoices.length} docs</div>
           </div>
-          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between">
-            <span className="text-xs text-slate-500 dark:text-slate-400">{t('invoiceList.pendingIssuance')}</span>
-            <span className="text-sm font-bold text-amber-600 dark:text-amber-400">
-              {t('invoiceList.pendingIssuanceVal').replace('{n}', invoices.filter(i => i.status === 'draft').length)}
-            </span>
+          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.pending')}</div>
+            <div className="text-lg font-bold text-amber-600 dark:text-amber-400">
+              {invoices.filter(i => i.status !== 'cancelled' && !issuedMap.has(i.sapBillingDoc)).length}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{t('invoiceList.summary.needsAction')}</div>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.revenue')}</div>
+            <div className="text-sm font-bold text-blue-600 dark:text-blue-400">{fmt(totalRevenue)}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{t('invoiceList.summary.totalBillingDocs')}</div>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.cancelled')}</div>
+            <div className="text-lg font-bold text-red-500 dark:text-red-400">
+              {invoices.filter(i => i.status === 'cancelled').length}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">billing docs</div>
           </div>
         </div>
 
@@ -193,7 +273,7 @@ export default function InvoiceList() {
               />
             </div>
             <Button icon={RefreshCw} size="sm" variant="ghost" onClick={doRefresh}>
-              Tải lại
+              {t('topbar.refresh')}
             </Button>
             {activityLog.length > 0 && (
               <button onClick={() => setShowLog(v => !v)}
@@ -202,7 +282,7 @@ export default function InvoiceList() {
                     ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
                     : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
                 }`}>
-                <Activity size={12} /> Nhật ký ({activityLog.length})
+                <Activity size={12} /> {t('invoiceList.panel.activityLog').replace('{count}', activityLog.length)}
               </button>
             )}
           </div>
@@ -218,21 +298,36 @@ export default function InvoiceList() {
             </div>
           ) : (
             <table className="w-full text-sm">
+              <colgroup>
+                <col style={{width: '44px'}} />
+                <col style={{width: '130px'}} />
+                <col style={{width: '190px'}} />
+                <col style={{width: '170px'}} />
+                <col style={{width: '108px'}} />
+                <col style={{width: '108px'}} />
+                <col style={{width: '140px'}} />
+                <col style={{width: '108px'}} />
+                <col style={{width: '140px'}} />
+              </colgroup>
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-700/50 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                  <th className="text-left px-5 py-2.5 font-semibold">Billing Doc</th>
-                  <th className="text-left px-4 py-2.5 font-semibold">← Phiếu giao hàng</th>
+                  <th className="px-3 py-2.5">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allPageChecked}
+                      onChange={toggleAll}
+                      disabled={issuableOnPage.length === 0}
+                      className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-500 accent-blue-600 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                  </th>
+                  <th className="text-left px-4 py-2.5 font-semibold">{t('invoiceList.col.billingDoc')}</th>
                   <th className="text-left px-4 py-2.5 font-semibold">{t('invoiceList.col.customer')}</th>
+                  <th className="text-left px-4 py-2.5 font-semibold">{t('invoiceList.col.paymentMethod')}</th>
                   <th className="text-left px-4 py-2.5 font-semibold">{t('invoiceList.col.issueDate')}</th>
                   <th className="text-left px-4 py-2.5 font-semibold">{t('invoiceList.col.dueDate')}</th>
                   <th className="text-right px-4 py-2.5 font-semibold">{t('invoiceList.col.total')}</th>
                   <th className="text-center px-4 py-2.5 font-semibold">{t('invoiceList.col.status')}</th>
-                  <th className="text-center px-4 py-2.5 font-semibold">
-                    <span className="flex items-center justify-center gap-1">
-                      Số HĐĐT
-                      {viettelLoading && isViettelConfigured() && <span className="w-2.5 h-2.5 border border-slate-300 border-t-slate-500 rounded-full animate-spin" />}
-                    </span>
-                  </th>
                   <th className="px-4 py-2.5"></th>
                 </tr>
               </thead>
@@ -242,13 +337,13 @@ export default function InvoiceList() {
                     <td colSpan={9}>
                       <EmptyState
                         icon={error ? WifiOff : FileText}
-                        title={error ? 'Không tải được dữ liệu' : 'Không có Billing Document'}
+                        title={error ? t('invoiceList.empty.errorTitle') : t('invoiceList.empty.noData')}
                         description={
                           error
-                            ? 'Kết nối SAP_COM_0192 thất bại. Kiểm tra cấu hình trong Settings → SAP.'
+                            ? t('invoiceList.empty.errorDesc')
                             : sapInfo.live
-                              ? 'SAP chưa có Billing Document nào khớp bộ lọc hiện tại.'
-                              : 'Chưa kết nối SAP — đang dùng dữ liệu demo.'
+                              ? t('invoiceList.empty.noMatch')
+                              : t('invoiceList.empty.demo')
                         }
                       />
                     </td>
@@ -257,11 +352,27 @@ export default function InvoiceList() {
                 {pagedInvoices.map(inv => {
                   const total = getInvoiceTotal(inv)
                   const isSelected = selectedInv?.id === inv.id
+                  const isIssuable = inv.status !== 'cancelled' && !issuedMap.has(inv.sapBillingDoc)
+                  const isChecked  = checkedIds.has(inv.sapBillingDoc)
                   return (
                     <tr key={inv.id}
-                      className={`cursor-pointer transition-colors group ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-slate-50/60 dark:hover:bg-slate-700/30'}`}
+                      className={`cursor-pointer transition-colors group ${
+                        isChecked   ? 'bg-blue-50 dark:bg-blue-900/20' :
+                        isSelected  ? 'bg-slate-100 dark:bg-slate-700/40' :
+                        'hover:bg-slate-50/60 dark:hover:bg-slate-700/30'
+                      }`}
                       onClick={() => setSelectedInv(isSelected ? null : inv)}>
-                      <td className="px-5 py-3">
+                      <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                        {isIssuable && (
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={e => toggleCheck(inv.sapBillingDoc, e)}
+                            className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-500 accent-blue-600 cursor-pointer"
+                          />
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
                         <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">
                           {inv.sapBillingDoc}
                         </span>
@@ -270,21 +381,17 @@ export default function InvoiceList() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {inv.deliveryRef
-                          ? <button
-                              onClick={e => { e.stopPropagation(); navigate('/deliveries', { state: { soFilter: inv.deliveryRef } }) }}
-                              className="flex items-center gap-1 font-mono text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-                            >
-                              <Truck size={10} /> {inv.deliveryRef}
-                            </button>
-                          : <span className="text-slate-400 text-xs">—</span>
-                        }
+                        <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[180px]">
+                          {inv.customer.name || inv.customer.code || '—'}
+                        </div>
+                        {inv.customer.code && (
+                          <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{inv.customer.code}</div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">{inv.customer.name}</div>
-                        {inv.customer.taxCode && (
-                          <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">MST: {inv.customer.taxCode}</div>
-                        )}
+                        <div className="text-xs text-slate-700 dark:text-slate-300 truncate max-w-[160px]">
+                          {inv.paymentMethod || '—'}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-400">{inv.issueDate}</td>
                       <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{inv.dueDate || '—'}</td>
@@ -292,46 +399,33 @@ export default function InvoiceList() {
                         <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
                           {fmt(total, inv.currency)}
                         </span>
-                        {inv.currency && inv.currency !== 'VND' && (
-                          <div className="text-[10px] text-slate-400 mt-0.5 text-right">{inv.currency}</div>
-                        )}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {inv.status === 'cancelled'
-                          ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">Đã hủy</span>
-                          : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">Chưa phát hành</span>
+                          ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('invoiceList.status.cancelled')}</span>
+                          : issuedMap.has(inv.sapBillingDoc)
+                            ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={9} /> {t('invoiceList.status.issued')}</span>
+                            : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
                         }
                       </td>
-                      <td className="px-4 py-3 text-center">
-                        {(() => {
-                          const vt = viettelMap.get(inv.sapBillingDoc)
-                          if (viettelLoading && isViettelConfigured() && !vt) return <span className="w-3 h-3 border border-slate-300 border-t-slate-400 rounded-full animate-spin inline-block" />
-                          if (vt?.exists && vt.invoiceNo) return (
-                            <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
-                              {vt.invoiceNo}
-                            </span>
-                          )
-                          return <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>
-                        })()}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center gap-1 justify-end">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5 justify-end">
                           <button
                             onClick={e => { e.stopPropagation(); setSelectedInv(isSelected ? null : inv) }}
-                            className={`flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium border rounded-lg transition-colors ${
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors ${
                               isSelected
-                                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                                : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                                : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20'
                             }`}
                           >
-                            <Eye size={11} /> Chi tiết
+                            <Eye size={11} /> {t('invoiceList.details')}
                           </button>
-                          {inv.status !== 'cancelled' && (
+                          {inv.status !== 'cancelled' && !issuedMap.has(inv.sapBillingDoc) && (
                             <button
                               onClick={e => { e.stopPropagation(); navigate(`/billing-preview/${inv.sapBillingDoc}`, { state: { inv } }) }}
-                              className="flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors whitespace-nowrap cursor-pointer"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-sm cursor-pointer"
                             >
-                              <Send size={11} /> Phát hành
+                              <Send size={11} /> {t('invoiceList.issue')}
                             </button>
                           )}
                         </div>
@@ -341,6 +435,36 @@ export default function InvoiceList() {
                 })}
               </tbody>
             </table>
+          )}
+
+          {/* Bulk action bar */}
+          {checkedIds.size > 0 && (
+            <div className="flex items-center gap-3 px-5 py-3 border-t border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/20">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold shrink-0">
+                  {checkedIds.size}
+                </span>
+                <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                  {checkedIds.size} invoice{checkedIds.size > 1 ? 's' : ''} selected
+                </span>
+                <span className="text-xs text-blue-500 dark:text-blue-400">·</span>
+                <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                  {fmt(checkedTotal)}
+                </span>
+              </div>
+              <button
+                onClick={() => setCheckedIds(new Set())}
+                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors px-2 py-1"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setBulkConfirm(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors"
+              >
+                <Zap size={12} /> Issue {checkedIds.size} Invoice{checkedIds.size > 1 ? 's' : ''}
+              </button>
+            </div>
           )}
 
           {invoices.length > 0 && (
@@ -361,20 +485,20 @@ export default function InvoiceList() {
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 dark:border-slate-700">
               <Activity size={14} className="text-blue-600 dark:text-blue-400" />
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Nhật ký hoạt động hóa đơn</span>
-              <span className="ml-auto text-[10px] text-slate-400">{activityLog.length} sự kiện</span>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t('invoiceList.activityTitle')}</span>
+              <span className="ml-auto text-[10px] text-slate-400">{activityLog.length} {t('invoiceList.panel.events')}</span>
             </div>
             <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
               {activityLog.slice(0, 20).map((log, i) => {
                 const typeMap = {
-                  create: { label: 'Tạo nháp', color: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' },
-                  issue:  { label: 'Phát hành', color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30' },
-                  cancel: { label: 'Hủy', color: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30' },
+                  create: { label: t('invoiceList.log.create'), color: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' },
+                  issue:  { label: t('invoiceList.log.issue'),  color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30' },
+                  cancel: { label: t('invoiceList.log.cancel'), color: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30' },
                 }
-                const t = typeMap[log.type] || { label: log.type, color: 'text-slate-500 bg-slate-100' }
+                const logEntry = typeMap[log.type] || { label: log.type, color: 'text-slate-500 bg-slate-100' }
                 return (
                   <div key={i} className="flex items-center gap-4 px-5 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${t.color}`}>{t.label}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${logEntry.color}`}>{logEntry.label}</span>
                     <span className="font-mono text-xs text-blue-600 dark:text-blue-400 shrink-0">{log.invoiceId}</span>
                     {log.customer && <span className="text-xs text-slate-600 dark:text-slate-300 truncate flex-1">{log.customer}</span>}
                     {log.soRef && <span className="text-[11px] text-slate-400 shrink-0">SO {log.soRef}</span>}
@@ -388,6 +512,56 @@ export default function InvoiceList() {
         )}
       </div>
 
+      {/* ── Bulk Issue Confirm Modal ────────────────────────────── */}
+      {bulkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setBulkConfirm(false)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+              <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
+                <Zap size={15} className="text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                  Issue {checkedInvoices.length} Invoice{checkedInvoices.length > 1 ? 's' : ''}
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5">Invoices will be processed one by one in sequence</div>
+              </div>
+              <button onClick={() => setBulkConfirm(false)} className="ml-auto p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
+                <X size={15} />
+              </button>
+            </div>
+            <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+              {checkedInvoices.map((inv, i) => (
+                <div key={inv.sapBillingDoc} className="flex items-center gap-3 px-6 py-3">
+                  <span className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 text-[10px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-mono font-semibold text-blue-600 dark:text-blue-400">{inv.sapBillingDoc}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{inv.customer?.name || '—'}</div>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 shrink-0">{fmt(getInvoiceTotal(inv), inv.currency)}</div>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between gap-3">
+              <div className="text-xs text-slate-500">
+                Total: <span className="font-bold text-slate-800 dark:text-slate-200">{fmt(checkedTotal)}</span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setBulkConfirm(false)}
+                  className="px-4 py-2 text-xs font-medium border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                  Cancel
+                </button>
+                <button onClick={startBulkIssue}
+                  className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors">
+                  <Zap size={12} /> Start Issuing
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Billing Detail Panel ─────────────────────────────────── */}
       {selectedInv && (
         <div className="fixed inset-y-0 right-0 z-40 flex">
@@ -400,12 +574,17 @@ export default function InvoiceList() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">{selectedInv.sapBillingDoc}</span>
-                  <Badge status={selectedInv.status} />
+                  {selectedInv.status === 'cancelled'
+                    ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('invoiceList.status.cancelled')}</span>
+                    : issuedMap.has(selectedInv.sapBillingDoc)
+                      ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={9} /> {t('invoiceList.status.issued')}</span>
+                      : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
+                  }
                   {selectedInv.billingDocType && (
                     <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">{selectedInv.billingDocType}</span>
                   )}
                 </div>
-                <div className="text-xs text-slate-400 mt-0.5">Billing Document · SAP_COM_0192</div>
+                <div className="text-xs text-slate-400 mt-0.5">Billing Document</div>
               </div>
               <button onClick={() => setSelectedInv(null)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 transition-colors">
                 <X size={16} />
@@ -416,36 +595,32 @@ export default function InvoiceList() {
 
               {/* Khách hàng */}
               <section>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Người mua hàng</div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('invoiceList.panel.buyer')}</div>
                 <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 space-y-1.5 text-xs">
                   <div className="font-semibold text-slate-800 dark:text-slate-100 text-sm">{selectedInv.customer.name || '—'}</div>
-                  {selectedInv.customer.code && <div className="text-slate-500">Mã KH: <span className="font-mono">{selectedInv.customer.code}</span></div>}
-                  {selectedInv.customer.taxCode && <div className="text-slate-500">MST: <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedInv.customer.taxCode}</span></div>}
-                  {selectedInv.customer.address && <div className="text-slate-500">Địa chỉ: {selectedInv.customer.address}</div>}
-                  {selectedInv.customer.phone && <div className="text-slate-500">ĐT: {selectedInv.customer.phone}</div>}
+                  {selectedInv.customer.code && <div className="text-slate-500">{t('invoiceList.panel.custCode')}: <span className="font-mono">{selectedInv.customer.code}</span></div>}
+                  {selectedInv.customer.taxCode && <div className="text-slate-500">{t('invoiceList.panel.taxCode')}: <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedInv.customer.taxCode}</span></div>}
+                  {selectedInv.customer.address && <div className="text-slate-500">{t('invoiceList.panel.address')}: {selectedInv.customer.address}</div>}
+                  {selectedInv.customer.phone && <div className="text-slate-500">{t('invoiceList.panel.phone')}: {selectedInv.customer.phone}</div>}
                   {selectedInv.customer.email && <div className="text-slate-500">Email: {selectedInv.customer.email}</div>}
                 </div>
               </section>
 
               {/* Thông tin chứng từ */}
               <section>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Thông tin chứng từ</div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('invoiceList.panel.docInfo')}</div>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { label: 'Billing Document', value: selectedInv.sapBillingDoc },
-                    { label: 'Loại chứng từ', value: selectedInv.billingDocType || '—' },
-                    { label: 'Ngày phát hành', value: selectedInv.issueDate || '—' },
-                    { label: 'Ngày đến hạn', value: selectedInv.dueDate || '—' },
-                    { label: 'Đơn vị tiền tệ', value: selectedInv.currency || 'VND' },
-                    { label: 'Điều kiện thanh toán', value: selectedInv.paymentMethod || '—' },
-                    selectedInv.deliveryRef ? { label: 'Phiếu giao hàng (Delivery)', value: selectedInv.deliveryRef, link: () => { setSelectedInv(null); navigate('/deliveries', { state: { soFilter: selectedInv.deliveryRef } }) } } : null,
+                    { label: t('invoiceList.panel.docField.billingDoc'), value: selectedInv.sapBillingDoc },
+                    { label: t('invoiceList.panel.docField.docType'), value: selectedInv.billingDocType || '—' },
+                    { label: t('invoiceList.panel.docField.issueDate'), value: selectedInv.issueDate || '—' },
+                    { label: t('invoiceList.panel.docField.dueDate'), value: selectedInv.dueDate || '—' },
+                    { label: t('invoiceList.panel.docField.currency'), value: selectedInv.currency || 'VND' },
+                    { label: t('invoiceList.panel.docField.paymentTerms'), value: selectedInv.paymentMethod || '—' },
                   ].filter(Boolean).map(r => (
                     <div key={r.label} className="bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
                       <div className="text-[10px] text-slate-400 mb-0.5">{r.label}</div>
-                      {r.link
-                        ? <button onClick={r.link} className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"><Truck size={10} />{r.value}</button>
-                        : <div className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">{r.value}</div>
-                      }
+                      <div className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">{r.value}</div>
                     </div>
                   ))}
                 </div>
@@ -454,16 +629,16 @@ export default function InvoiceList() {
               {/* Line items */}
               {selectedInv.items?.length > 0 && (
                 <section>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Dòng hàng ({selectedInv.items.length})</div>
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('invoiceList.panel.lineItems').replace('{count}', selectedInv.items.length)}</div>
                   <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
-                          <th className="text-left px-3 py-2">Mô tả</th>
-                          <th className="text-right px-3 py-2">SL</th>
-                          <th className="text-right px-3 py-2">Đơn giá</th>
-                          <th className="text-right px-3 py-2">VAT</th>
-                          <th className="text-right px-3 py-2">Thành tiền</th>
+                          <th className="text-left px-3 py-2">{t('invoiceList.panel.col.desc')}</th>
+                          <th className="text-right px-3 py-2">{t('invoiceList.panel.col.qty')}</th>
+                          <th className="text-right px-3 py-2">{t('invoiceList.panel.col.price')}</th>
+                          <th className="text-right px-3 py-2">{t('invoiceList.panel.col.vat')}</th>
+                          <th className="text-right px-3 py-2">{t('invoiceList.panel.col.amount')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -493,13 +668,13 @@ export default function InvoiceList() {
               {/* Totals */}
               <section className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 space-y-1.5 text-xs">
                 {selectedInv.totalNetAmount != null && (
-                  <div className="flex justify-between text-slate-500"><span>Tiền hàng (chưa VAT)</span><span>{Number(selectedInv.totalNetAmount).toLocaleString('vi-VN')} {selectedInv.currency}</span></div>
+                  <div className="flex justify-between text-slate-500"><span>{t('invoiceList.panel.netAmount')}</span><span>{Number(selectedInv.totalNetAmount).toLocaleString('vi-VN')} {selectedInv.currency}</span></div>
                 )}
                 {selectedInv.totalTaxAmount != null && (
-                  <div className="flex justify-between text-slate-500"><span>Thuế VAT</span><span>{Number(selectedInv.totalTaxAmount).toLocaleString('vi-VN')} {selectedInv.currency}</span></div>
+                  <div className="flex justify-between text-slate-500"><span>{t('invoiceList.panel.taxAmount')}</span><span>{Number(selectedInv.totalTaxAmount).toLocaleString('vi-VN')} {selectedInv.currency}</span></div>
                 )}
                 <div className="flex justify-between font-bold text-sm text-slate-800 dark:text-slate-100 pt-1.5 border-t border-slate-200 dark:border-slate-600">
-                  <span>Tổng cộng</span>
+                  <span>{t('invoiceList.panel.grossAmount')}</span>
                   <span className="text-blue-600 dark:text-blue-400">{fmt(getInvoiceTotal(selectedInv), selectedInv.currency)}</span>
                 </div>
               </section>
@@ -509,21 +684,28 @@ export default function InvoiceList() {
             <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
               {selectedInv.status === 'cancelled' ? (
                 <div className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 rounded-xl">
-                  Hóa đơn đã hủy
+                  {t('invoiceList.panel.cancelled')}
                 </div>
+              ) : issuedMap.has(selectedInv.sapBillingDoc) ? (
+                <button
+                  onClick={() => { setSelectedInv(null); navigate(`/billing-preview/${selectedInv.sapBillingDoc}`, { state: { inv: selectedInv, issued: true } }) }}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl transition-colors cursor-pointer"
+                >
+                  <Eye size={14} /> {t('invoiceList.panel.viewIssued')}
+                </button>
               ) : (
                 <button
                   onClick={() => { setSelectedInv(null); navigate(`/billing-preview/${selectedInv.sapBillingDoc}`, { state: { inv: selectedInv } }) }}
                   className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-colors cursor-pointer"
                 >
-                  <Send size={14} /> Phát hành hóa đơn
+                  <Send size={14} /> {t('invoiceList.panel.issue')}
                 </button>
               )}
               <button
                 onClick={() => setSelectedInv(null)}
                 className="px-4 py-2.5 text-sm font-medium border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
               >
-                Đóng
+                {t('invoiceList.panel.close')}
               </button>
             </div>
           </div>

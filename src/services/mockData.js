@@ -42,6 +42,8 @@ export const mockInvoices = [
     taxAuthorityCode: '202400000001AB3F',
     templateCode: '01GTKT0/001',
     buyerName: 'James Anderson',
+    billTo: 'ABC Technology Co., Ltd',
+    billToCode: 'C001',
     paymentMethod: 'Bank Transfer / Cash',
     currency: 'VND',
     customer: {

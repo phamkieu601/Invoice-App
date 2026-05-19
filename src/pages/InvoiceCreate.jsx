@@ -100,7 +100,7 @@ export default function InvoiceCreate() {
     <div className="flex flex-col h-full">
       <Topbar
         title={t('create.title')}
-        subtitle={so ? `Từ đơn hàng SAP · SO ${so.soNumber}` : t('create.subtitle')}
+        subtitle={so ? t('create.subtitleSO', { so: so.soNumber }) : t('create.subtitle')}
         actions={
           <Button icon={ArrowLeft} size="sm" variant="ghost"
             onClick={() => navigate(so ? '/sales-orders' : '/invoices')}>
@@ -116,8 +116,8 @@ export default function InvoiceCreate() {
           <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-700/30 flex items-center justify-between">
               <div>
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Thông số hóa đơn</div>
-                <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Mẫu số, ký hiệu và ngày lập theo đăng ký với cơ quan thuế</div>
+                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t('create.section.params')}</div>
+                <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{t('create.section.paramsSub')}</div>
               </div>
               {/* Seller badge */}
               <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg">
@@ -135,7 +135,7 @@ export default function InvoiceCreate() {
               <div className="grid grid-cols-3 gap-4">
                 {/* Template */}
                 <div className="col-span-1">
-                  <Label required>Mẫu số hóa đơn</Label>
+                  <Label required>{t('create.label.template')}</Label>
                   <select {...register('templateCode', { required: true })} className={inputCls(errors.templateCode)}>
                     {INVOICE_TEMPLATES.map(tpl => (
                       <option key={tpl.code} value={tpl.code}>
@@ -150,20 +150,20 @@ export default function InvoiceCreate() {
 
                 {/* Series */}
                 <div>
-                  <Label required>Ký hiệu</Label>
+                  <Label required>{t('create.label.series')}</Label>
                   <input
                     {...register('series', { required: true })}
                     className={inputCls(errors.series)}
                     placeholder="e.g. 1C24ABO"
                   />
                   <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-                    Tự điền theo mẫu · có thể chỉnh sửa
+                    {t('create.label.seriesHint')}
                   </div>
                 </div>
 
                 {/* Invoice Date */}
                 <div>
-                  <Label required>Ngày lập hóa đơn</Label>
+                  <Label required>{t('create.label.invoiceDate')}</Label>
                   <input type="date" {...register('invoiceDate', { required: true })} className={inputCls(errors.invoiceDate)} />
                   <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
                     Date the invoice is formally created
@@ -411,30 +411,30 @@ export default function InvoiceCreate() {
 
             {/* title */}
             <h3 className="text-center text-base font-semibold text-slate-800 dark:text-slate-100 mb-1">
-              Lưu hóa đơn nháp?
+              {t('create.modal.title')}
             </h3>
             <p className="text-center text-xs text-slate-500 dark:text-slate-400 mb-1">
-              Hóa đơn sẽ được lưu dạng nháp. Xem lại trước khi ký số và phát hành.
+              {t('create.modal.body')}
             </p>
 
             {/* summary */}
             <div className="mt-4 mb-5 bg-slate-50 dark:bg-slate-700/50 rounded-xl px-4 py-3 space-y-1.5 text-xs">
               <div className="flex justify-between">
-                <span className="text-slate-500 dark:text-slate-400">Khách hàng</span>
+                <span className="text-slate-500 dark:text-slate-400">{t('create.modal.customer')}</span>
                 <span className="font-medium text-slate-700 dark:text-slate-200 text-right max-w-[180px] truncate">
                   {confirmData.customer?.name || '—'}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500 dark:text-slate-400">Ngày lập</span>
+                <span className="text-slate-500 dark:text-slate-400">{t('create.modal.issueDate')}</span>
                 <span className="font-medium text-slate-700 dark:text-slate-200">{confirmData.issueDate}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500 dark:text-slate-400">Số dòng hàng</span>
-                <span className="font-medium text-slate-700 dark:text-slate-200">{confirmData.items?.length} dòng</span>
+                <span className="text-slate-500 dark:text-slate-400">{t('create.modal.lines')}</span>
+                <span className="font-medium text-slate-700 dark:text-slate-200">{t('create.modal.linesUnit', { n: confirmData.items?.length })}</span>
               </div>
               <div className="flex justify-between border-t border-slate-200 dark:border-slate-600 pt-1.5 mt-1">
-                <span className="text-slate-500 dark:text-slate-400">Tổng tiền thanh toán</span>
+                <span className="text-slate-500 dark:text-slate-400">{t('create.modal.total')}</span>
                 <span className="font-bold text-blue-600 dark:text-blue-400">
                   {Number(
                     (confirmData.items || []).reduce((s, it) =>
@@ -450,13 +450,13 @@ export default function InvoiceCreate() {
                 onClick={() => setConfirmData(null)}
                 className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
               >
-                Quay lại
+                {t('create.modal.back')}
               </button>
               <button
                 onClick={onConfirm}
                 className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-sm font-semibold text-white transition-colors shadow-sm shadow-blue-200 dark:shadow-none"
               >
-                Xác nhận lưu nháp
+                {t('create.modal.confirm')}
               </button>
             </div>
           </div>

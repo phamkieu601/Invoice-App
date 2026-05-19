@@ -1,20 +1,16 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo, useRef } from 'react'
+import * as XLSX from 'xlsx'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
-} from 'recharts'
-import {
-  FileBarChart2, FileSpreadsheet, Download, Filter,
-  TrendingUp, Receipt, FileCheck2, FileClock, FileX2,
-  ChevronDown, Printer, Send, RefreshCw, Building2,
+  FileBarChart2, FileText, Filter, FileSpreadsheet,
+  TrendingUp, Receipt, FileCheck2, CheckCircle2, X, Eye,
+  ChevronDown, Printer, Send, RefreshCw, Building2, Download,
 } from 'lucide-react'
+import { useT } from '../i18n'
 import { useInvoiceStore } from '../store/invoiceStore'
-import { calcTotals, getSeller, INVOICE_TEMPLATES } from '../services/mockData'
-// Evaluated fresh on each module load — reflects latest company settings saved to localStorage
-const SELLER = getSeller()
+import { getIssuedInvoices } from '../services/issuedInvoiceService'
+import { useCompanyStore } from '../store/companyStore'
 import Topbar from '../components/layout/Topbar'
 import Button from '../components/ui/Button'
-import Badge from '../components/ui/Badge'
-import { useThemeStore } from '../store/themeStore'
 import { toast } from '../store/toastStore'
 
 const fmt  = (n) => Number(n || 0).toLocaleString('vi-VN') + ' ₫'
@@ -48,233 +44,532 @@ function SelectBox({ value, onChange, options, className = '' }) {
 }
 
 // ─────────────────────────────────────────────
-// TAB 1: Báo cáo hóa đơn
+// Invoice Detail Drawer (matches InvoiceList panel style)
 // ─────────────────────────────────────────────
-function InvoiceReport({ invoices }) {
-  const { dark } = useThemeStore()
-  const [period, setPeriod] = useState('month')
-  const [month, setMonth]   = useState('05')
-  const [quarter, setQuarter] = useState('Q2')
-  const [year, setYear]     = useState('2024')
-  const [statusFilter, setStatusFilter] = useState('')
+function InvoiceDetailDrawer({ record, onClose }) {
+  const t = useT()
+  if (!record) return null
+  const r   = record
+  const sap = r._sap
+  const items       = sap?.items || r.items || []
+  const netAmount   = sap?.totalNetAmount   || r.total_amount || 0
+  const taxAmount   = sap?.totalTaxAmount   || 0
+  const grossAmount = sap?.totalGrossAmount || r.total_amount || 0
+  const currency    = r.currency || 'VND'
 
-  const filtered = useMemo(() => {
-    return invoices.filter(inv => {
-      if (!inv.issueDate) return false
-      const [y, m] = inv.issueDate.split('-')
-      const matchYear = y === year
-      const matchPeriod =
-        period === 'year' ? true
-        : period === 'quarter' ? QUARTERS.find(q => q.value === quarter)?.months.includes(m)
-        : m === month
-      const matchStatus = !statusFilter || inv.status === statusFilter
-      return matchYear && matchPeriod && matchStatus
-    })
-  }, [invoices, period, month, quarter, year, statusFilter])
+  const isIssued    = r.status !== 'cancelled'
+  const signedDate  = r.signed_at ? new Date(r.signed_at).toLocaleString('vi-VN') : '—'
 
-  const issued    = filtered.filter(i => i.status === 'issued')
-  const draft     = filtered.filter(i => i.status === 'draft')
-  const cancelled = filtered.filter(i => i.status === 'cancelled')
-
-  const totalRevenue = issued.reduce((s, i) => s + calcTotals(i.items).subtotal, 0)
-  const totalVAT     = issued.reduce((s, i) => s + calcTotals(i.items).vat, 0)
-  const totalAmount  = issued.reduce((s, i) => s + calcTotals(i.items).total, 0)
-
-  // Bar chart by template type
-  const byTemplate = INVOICE_TEMPLATES.map(t => {
-    const invs = issued.filter(i => i.templateCode === t.code)
-    return {
-      name: t.type,
-      label: t.name,
-      count: invs.length,
-      revenue: invs.reduce((s, i) => s + calcTotals(i.items).total, 0),
-    }
-  })
-
-  const periodLabel = period === 'month'
-    ? `Tháng ${month}/${year}`
-    : period === 'quarter'
-    ? `${QUARTERS.find(q => q.value === quarter)?.label} năm ${year}`
-    : `Năm ${year}`
-
-  const gridColor = dark ? '#334155' : '#e2e8f0'
-  const tickColor = dark ? '#94a3b8' : '#64748b'
+  const infoCards = [
+    { label: 'Billing Document', value: r.billing_doc },
+    { label: 'Doc Type',         value: r.billing_doc_type || '—' },
+    { label: 'Series',           value: r.viettel_series || '—' },
+    { label: 'Invoice No.',      value: r.viettel_invoice_no || '—' },
+    { label: 'Invoice Date',     value: r.issue_date || '—' },
+    { label: 'Signed At',        value: signedDate },
+  ]
 
   return (
-    <div className="space-y-5">
-      {/* Filter bar */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 px-5 py-3 flex flex-wrap items-center gap-3">
-        <Filter size={13} className="text-slate-400 shrink-0" />
-        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Kỳ báo cáo:</span>
-        <SelectBox value={period} onChange={setPeriod} className="w-28"
-          options={[{ value: 'month', label: 'Theo tháng' }, { value: 'quarter', label: 'Theo quý' }, { value: 'year', label: 'Cả năm' }]} />
-        {period === 'month' && (
-          <SelectBox value={month} onChange={setMonth} className="w-28"
-            options={MONTHS.map(m => ({ value: m, label: `Tháng ${m}` }))} />
-        )}
-        {period === 'quarter' && (
-          <SelectBox value={quarter} onChange={setQuarter} className="w-40"
-            options={QUARTERS.map(q => ({ value: q.value, label: q.label }))} />
-        )}
-        <SelectBox value={year} onChange={setYear} className="w-24"
-          options={YEARS.map(y => ({ value: y, label: `Năm ${y}` }))} />
-        <div className="w-px h-4 bg-slate-200 dark:bg-slate-600" />
-        <SelectBox value={statusFilter} onChange={setStatusFilter} className="w-32"
-          options={[{ value: '', label: 'Tất cả TT' }, { value: 'issued', label: 'Đã phát hành' }, { value: 'draft', label: 'Nháp' }, { value: 'cancelled', label: 'Đã hủy' }]} />
-        <div className="ml-auto flex gap-2">
-          <Button icon={Printer} size="sm" variant="secondary" onClick={() => window.print()}>In báo cáo</Button>
-          <Button icon={Download} size="sm" variant="primary" onClick={() => toast.info('Xuất Excel — tính năng sẽ hỗ trợ trong phiên bản tiếp theo.')}>Xuất Excel</Button>
-        </div>
-      </div>
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20 dark:bg-black/40" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 z-50 flex">
+        <div className="relative ml-auto w-full max-w-md bg-white dark:bg-slate-800 shadow-2xl flex flex-col overflow-hidden">
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'Tổng phát hành',  value: issued.length,  sub: `${draft.length} nháp · ${cancelled.length} hủy`, icon: FileCheck2, color: 'bg-blue-50 dark:bg-blue-900/20',   ic: 'text-blue-600',   vc: 'text-blue-700 dark:text-blue-300' },
-          { label: 'Doanh thu (trước thuế)', value: fmt(totalRevenue), sub: periodLabel, icon: TrendingUp,  color: 'bg-green-50 dark:bg-green-900/20',  ic: 'text-green-600',  vc: 'text-green-700 dark:text-green-300' },
-          { label: 'Thuế GTGT',        value: fmt(totalVAT),     sub: 'Từ HĐ đã phát hành',     icon: Receipt,      color: 'bg-purple-50 dark:bg-purple-900/20', ic: 'text-purple-600', vc: 'text-purple-700 dark:text-purple-300' },
-          { label: 'Tổng thanh toán',  value: fmt(totalAmount),  sub: 'Bao gồm thuế GTGT',      icon: FileBarChart2, color: 'bg-orange-50 dark:bg-orange-900/20', ic: 'text-orange-600', vc: 'text-orange-700 dark:text-orange-300' },
-        ].map(c => (
-          <div key={c.label} className={`${c.color} rounded-xl p-4 border border-white/50 dark:border-slate-700/50`}>
-            <c.icon size={16} className={`${c.ic} mb-2`} />
-            <div className={`text-xl font-bold ${c.vc}`}>{c.value}</div>
-            <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mt-0.5">{c.label}</div>
-            <div className="text-[11px] text-slate-400 dark:text-slate-500">{c.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Chart + breakdown */}
-      <div className="grid grid-cols-3 gap-4">
-        {/* Bar chart by type */}
-        <div className="col-span-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-0.5">Phân loại theo mẫu hóa đơn</div>
-          <div className="text-xs text-slate-400 dark:text-slate-500 mb-4">{periodLabel} · HĐ đã phát hành</div>
-          {issued.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-xs text-slate-400">Không có dữ liệu trong kỳ này</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={byTemplate} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: tickColor }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={fmtM} tick={{ fontSize: 10, fill: tickColor }} axisLine={false} tickLine={false} width={44} />
-                <Tooltip formatter={(v, n) => [fmtM(v) + ' ₫', 'Doanh thu']}
-                  contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e2e8f0' }} />
-                <Bar dataKey="revenue" radius={[6, 6, 0, 0]}>
-                  {byTemplate.map((_, i) => <Cell key={i} fill={['#3b82f6','#22c55e','#a855f7'][i]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        {/* Status breakdown */}
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-4">Trạng thái hóa đơn</div>
-          <div className="space-y-4">
-            {[
-              { label: 'Đã phát hành', count: issued.length,    color: '#22c55e', icon: FileCheck2 },
-              { label: 'Nháp',         count: draft.length,     color: '#eab308', icon: FileClock },
-              { label: 'Đã hủy',       count: cancelled.length, color: '#ef4444', icon: FileX2 },
-            ].map(s => (
-              <div key={s.label}>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                    <s.icon size={12} style={{ color: s.color }} />{s.label}
-                  </span>
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100">{s.count}</span>
-                </div>
-                <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full transition-all"
-                    style={{ width: `${filtered.length ? (s.count / filtered.length) * 100 : 0}%`, background: s.color }} />
-                </div>
+          {/* Header */}
+          <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">
+                  {r.viettel_invoice_no ? `Số ${r.viettel_invoice_no}` : r.billing_doc}
+                </span>
+                {isIssued
+                  ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                      <CheckCircle2 size={9} /> {t('invoiceList.panel.statusIssued')}
+                    </span>
+                  : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">
+                      {t('invoiceList.panel.statusCancelled')}
+                    </span>
+                }
+                {r.viettel_series && (
+                  <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded font-mono">{r.viettel_series}</span>
+                )}
               </div>
-            ))}
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
-              Tổng: <span className="font-bold text-slate-700 dark:text-slate-200">{filtered.length}</span> hóa đơn trong kỳ
+              <div className="text-xs text-slate-400 mt-0.5">E-Invoice · Supabase issued_invoices</div>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-5">
+
+            {/* Người mua */}
+            <section>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('invoiceList.panel.buyer')}</div>
+              <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 space-y-1.5 text-xs">
+                <div className="font-semibold text-slate-800 dark:text-slate-100 text-sm">{r.customer_name || '—'}</div>
+                {r.customer_code    && <div className="text-slate-500">Customer Code: <span className="font-mono">{r.customer_code}</span></div>}
+                {r.customer_tax_code && <div className="text-slate-500">Tax ID: <span className="font-semibold text-slate-700 dark:text-slate-300">{r.customer_tax_code}</span></div>}
+              </div>
+            </section>
+
+            {/* Thông tin chứng từ */}
+            <section>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('invoiceList.panel.docInfo')}</div>
+              <div className="grid grid-cols-2 gap-2">
+                {infoCards.map(c => (
+                  <div key={c.label} className="bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
+                    <div className="text-[10px] text-slate-400 mb-0.5">{c.label}</div>
+                    <div className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200 break-all">{c.value}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Mã CQT */}
+            {r.viettel_tax_authority_code && (
+              <section>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('invoiceList.panel.taxCode')}</div>
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl px-4 py-3">
+                  <div className="font-mono text-[11px] text-emerald-700 dark:text-emerald-300 break-all leading-relaxed">{r.viettel_tax_authority_code}</div>
+                </div>
+              </section>
+            )}
+
+            {/* Dòng hàng */}
+            {items.length > 0 && (
+              <section>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{t('invoiceList.panel.lineItems', { count: items.length })}</div>
+                <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+                        <th className="text-left px-3 py-2">{t('invoiceList.panel.colDesc')}</th>
+                        <th className="text-right px-3 py-2">{t('invoiceList.panel.colQty')}</th>
+                        <th className="text-right px-3 py-2">{t('invoiceList.panel.colUnitPrice')}</th>
+                        <th className="text-right px-3 py-2">{t('invoiceList.panel.colVat')}</th>
+                        <th className="text-right px-3 py-2">{t('invoiceList.panel.colAmount')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {items.map((it, i) => (
+                        <tr key={i} className="bg-white dark:bg-slate-800">
+                          <td className="px-3 py-2 text-slate-700 dark:text-slate-300 max-w-[140px]">
+                            <div className="truncate">{it.description || it.material || '—'}</div>
+                            {it.unit && <div className="text-[10px] text-slate-400">{it.unit}</div>}
+                          </td>
+                          <td className="px-3 py-2 text-right text-slate-600 dark:text-slate-400">{it.qty ?? '—'}</td>
+                          <td className="px-3 py-2 text-right text-slate-600 dark:text-slate-400">{fmtN(it.unitPrice)}</td>
+                          <td className="px-3 py-2 text-right text-slate-500">{it.vatRate != null ? it.vatRate + '%' : '—'}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-slate-800 dark:text-slate-200">
+                            {fmtN(it.netAmount ?? (it.qty * it.unitPrice))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {/* Totals */}
+            <section className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 space-y-1.5 text-xs">
+              <div className="flex justify-between text-slate-500">
+                <span>{t('invoiceList.panel.netAmount')}</span>
+                <span>{fmtN(netAmount)} {currency}</span>
+              </div>
+              <div className="flex justify-between text-slate-500">
+                <span>{t('invoiceList.panel.taxAmount')}</span>
+                <span className="text-purple-600 dark:text-purple-400">{fmtN(taxAmount)} {currency}</span>
+              </div>
+              <div className="flex justify-between font-bold text-sm text-slate-800 dark:text-slate-100 pt-1.5 border-t border-slate-200 dark:border-slate-600">
+                <span>{t('invoiceList.panel.grossAmount')}</span>
+                <span className="text-blue-600 dark:text-blue-400">{fmtN(grossAmount)} {currency}</span>
+              </div>
+            </section>
+          </div>
+
+          {/* Footer */}
+          <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
+            <button onClick={onClose}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer">
+              {t('common.close')}
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────
+// TAB 1: Tổng hợp hóa đơn điện tử
+// ─────────────────────────────────────────────
+function InvoiceReport({ invoices, issuedHDDT }) {
+  const t = useT()
+  const PAGE_SIZE = 15
+  const sapMap = useMemo(() => new Map(invoices.map(i => [i.sapBillingDoc, i])), [invoices])
+
+  // Filter state
+  const [fromDate, setFromDate] = useState('')
+  const [toDate,   setToDate]   = useState('')
+  const [loaiHD,   setLoaiHD]   = useState('')
+  const [kyHieu,   setKyHieu]   = useState('')
+  const [khachHang, setKhachHang] = useState('')
+  const [soHDTu,   setSoHDTu]   = useState('')
+  const [soHDDen,  setSoHDDen]  = useState('')
+  const [activeTab, setActiveTab] = useState('all')
+  const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState(null)
+
+  // Enrich issuedHDDT with SAP amounts
+  const enriched = useMemo(() =>
+    issuedHDDT.map(r => ({ ...r, _sap: sapMap.get(r.billing_doc) })),
+  [issuedHDDT, sapMap])
+
+  // Apply filters
+  const [appliedFilters, setAppliedFilters] = useState({ fromDate: '', toDate: '', loaiHD: '', kyHieu: '', khachHang: '', soHDTu: '', soHDDen: '' })
+
+  const handleSearch = () => {
+    setAppliedFilters({ fromDate, toDate, loaiHD, kyHieu, khachHang, soHDTu, soHDDen })
+    setPage(1)
+  }
+  const handleReset = () => {
+    setFromDate(''); setToDate(''); setLoaiHD(''); setKyHieu(''); setKhachHang(''); setSoHDTu(''); setSoHDDen('')
+    setAppliedFilters({ fromDate: '', toDate: '', loaiHD: '', kyHieu: '', khachHang: '', soHDTu: '', soHDDen: '' })
+    setPage(1)
+  }
+
+  const filtered = useMemo(() => {
+    const { fromDate, toDate, loaiHD, kyHieu, khachHang, soHDTu, soHDDen } = appliedFilters
+    return enriched.filter(r => {
+      const date = r.issue_date || r.signed_at?.slice(0,10) || ''
+      if (fromDate && date < fromDate) return false
+      if (toDate   && date > toDate)   return false
+      if (loaiHD   && (r.billing_doc_type || '') !== loaiHD) return false
+      if (kyHieu   && !(r.viettel_series || '').toLowerCase().includes(kyHieu.toLowerCase())) return false
+      if (khachHang) {
+        const q = khachHang.toLowerCase()
+        if (!(r.customer_name || '').toLowerCase().includes(q) && !(r.customer_tax_code || '').includes(q)) return false
+      }
+      if (soHDTu && r.viettel_invoice_no && Number(r.viettel_invoice_no) < Number(soHDTu)) return false
+      if (soHDDen && r.viettel_invoice_no && Number(r.viettel_invoice_no) > Number(soHDDen)) return false
+      return true
+    })
+  }, [enriched, appliedFilters])
+
+  // Tabs
+  const tabs = useMemo(() => ({
+    all:      filtered,
+    issued:   filtered.filter(r => r.status !== 'cancelled'),
+    cancelled:filtered.filter(r => r.status === 'cancelled'),
+    adjusted: filtered.filter(r => (r.billing_doc_type || '').includes('ZCRM') || (r.viettel_invoice_type || '') === 'adjusted'),
+    replaced: filtered.filter(r => (r.viettel_invoice_type || '') === 'replaced'),
+  }), [filtered])
+
+  const tabData = tabs[activeTab] ?? tabs.all
+
+  // KPI totals over non-cancelled
+  const active = tabs.issued
+  const totalCount   = filtered.length
+  const totalHang    = active.reduce((s, r) => s + (r._sap?.totalNetAmount   || r.total_amount || 0), 0)
+  const totalVAT     = active.reduce((s, r) => s + (r._sap?.totalTaxAmount   || 0), 0)
+  const totalPayment = active.reduce((s, r) => s + (r._sap?.totalGrossAmount || r.total_amount || 0), 0)
+
+  // Pagination
+  const totalPages = Math.ceil(tabData.length / PAGE_SIZE)
+  const paged = tabData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  // Page subtotals
+  const pageHang    = paged.filter(r=>r.status!=='cancelled').reduce((s,r)=>s+(r._sap?.totalNetAmount||r.total_amount||0), 0)
+  const pageVAT     = paged.filter(r=>r.status!=='cancelled').reduce((s,r)=>s+(r._sap?.totalTaxAmount||0), 0)
+  const pagePayment = paged.filter(r=>r.status!=='cancelled').reduce((s,r)=>s+(r._sap?.totalGrossAmount||r.total_amount||0), 0)
+
+  const loaiOptions = useMemo(() => {
+    const types = [...new Set(enriched.map(r => r.billing_doc_type).filter(Boolean))]
+    return [{ value: '', label: t('reports.filter.typeAll') }, ...types.map(tp => ({ value: tp, label: tp }))]
+  }, [enriched])
+
+  const inputCls = 'border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 text-xs bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+  const TABS = [
+    { key: 'all',       label: t('reports.tab.all'),       count: tabs.all.length },
+    { key: 'issued',    label: t('reports.tab.issued'),    count: tabs.issued.length },
+    { key: 'cancelled', label: t('reports.tab.cancelled'), count: tabs.cancelled.length },
+    { key: 'adjusted',  label: t('reports.tab.adjusted'),  count: tabs.adjusted.length },
+    { key: 'replaced',  label: t('reports.tab.replaced'),  count: tabs.replaced.length },
+  ]
+
+  // Export Excel
+  const handleExportExcel = () => {
+    const rows = tabData.map((r, i) => {
+      const sap = r._sap
+      const vatRates = sap ? [...new Set((sap.items||[]).map(it=>it.vatRate).filter(v=>v!=null))].map(v=>v+'%').join(', ') : ''
+      return {
+        'STT': i + 1,
+        'Ngày HĐ': r.issue_date || r.signed_at?.slice(0,10) || '',
+        'Ký hiệu': r.viettel_series || r.billing_doc_type || '',
+        'Số HĐ': r.viettel_invoice_no || '',
+        'Mã CQT': r.viettel_tax_authority_code || '',
+        'Billing Doc': r.billing_doc,
+        'Tên khách hàng': r.customer_name || '',
+        'MST khách hàng': r.customer_tax_code || '',
+        'Tiền hàng': sap?.totalNetAmount || r.total_amount || 0,
+        'Thuế VAT': sap?.totalTaxAmount || 0,
+        'Tổng thanh toán': sap?.totalGrossAmount || r.total_amount || 0,
+        'Thuế suất (%)': vatRates,
+        'Trạng thái': r.status === 'cancelled' ? 'Đã hủy' : 'Đã phát hành',
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    // Column widths
+    ws['!cols'] = [8,14,12,14,36,16,36,18,18,16,20,14,14].map(w=>({wch:w}))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Hoa don dien tu')
+    const label = activeTab === 'all' ? 'TatCa' : activeTab === 'issued' ? 'DaPhatHanh' : activeTab === 'cancelled' ? 'DaHuy' : activeTab
+    XLSX.writeFile(wb, `BaoCao_HDDT_${label}_${new Date().toISOString().slice(0,10)}.xlsx`)
+    toast.success('Đã xuất file Excel thành công.')
+  }
+
+  return (
+    <>
+      <div className="space-y-4">
+        {/* Filter bar */}
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 px-5 py-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{t('reports.filter.fromDate')}</label>
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={inputCls} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{t('reports.filter.toDate')}</label>
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={inputCls} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{t('reports.filter.type')}</label>
+              <div className="relative">
+                <select value={loaiHD} onChange={e => setLoaiHD(e.target.value)}
+                  className={`${inputCls} appearance-none pr-7 w-36`}>
+                  {loaiOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{t('reports.filter.series')}</label>
+              <input type="text" value={kyHieu} onChange={e => setKyHieu(e.target.value)} placeholder="VD: C24T" className={`${inputCls} w-32`} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{t('reports.filter.customer')}</label>
+              <input type="text" value={khachHang} onChange={e => setKhachHang(e.target.value)} placeholder="Tên hoặc mã số thuế" className={`${inputCls} w-44`} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{t('reports.filter.soFrom')} – {t('reports.filter.soTo')}</label>
+              <div className="flex items-center gap-1">
+                <input type="number" value={soHDTu} onChange={e => setSoHDTu(e.target.value)} placeholder={t('reports.filter.soFrom')} className={`${inputCls} w-20`} />
+                <span className="text-slate-400 text-xs">–</span>
+                <input type="number" value={soHDDen} onChange={e => setSoHDDen(e.target.value)} placeholder={t('reports.filter.soTo')} className={`${inputCls} w-20`} />
+              </div>
+            </div>
+            <div className="flex items-end gap-2 ml-auto">
+              <button onClick={handleReset}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                <RefreshCw size={12} /> {t('reports.filter.reset')}
+              </button>
+              <button onClick={handleSearch}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors">
+                <Filter size={12} /> {t('reports.filter.search')}
+              </button>
             </div>
           </div>
         </div>
+
+        {/* KPI cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { label: t('reports.kpi.total'),      value: fmtN(totalCount),   icon: FileText,      color: 'bg-blue-50 dark:bg-blue-900/20',    ic: 'text-blue-500',   vc: 'text-blue-700 dark:text-blue-300' },
+            { label: t('reports.kpi.netAmount'),  value: fmtN(totalHang),    icon: TrendingUp,    color: 'bg-green-50 dark:bg-green-900/20',   ic: 'text-green-500',  vc: 'text-green-700 dark:text-green-300' },
+            { label: t('reports.kpi.taxAmount'),  value: fmtN(totalVAT),     icon: Receipt,       color: 'bg-purple-50 dark:bg-purple-900/20', ic: 'text-purple-500', vc: 'text-purple-700 dark:text-purple-300' },
+            { label: t('reports.kpi.grossAmount'),value: fmtN(totalPayment), icon: FileBarChart2, color: 'bg-orange-50 dark:bg-orange-900/20', ic: 'text-orange-500', vc: 'text-orange-700 dark:text-orange-300' },
+          ].map(c => (
+            <div key={c.label} className={`${c.color} rounded-xl p-4 border border-white/50 dark:border-slate-700/50`}>
+              <c.icon size={16} className={`${c.ic} mb-2`} />
+              <div className={`text-xl font-bold ${c.vc}`}>{c.value}</div>
+              <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mt-0.5">{c.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Table card */}
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+          {/* Tabs + Export buttons */}
+          <div className="px-5 pt-4 pb-0 border-b border-slate-100 dark:border-slate-700 flex items-end justify-between gap-2">
+            <div className="flex gap-1 flex-wrap">
+              {TABS.map(t => (
+                <button key={t.key} onClick={() => { setActiveTab(t.key); setPage(1) }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-t-lg transition-colors ${
+                    activeTab === t.key
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                  }`}>
+                  {t.label} <span className={`ml-1 text-[10px] ${activeTab === t.key ? 'text-blue-200' : 'text-slate-400'}`}>{t.count.toLocaleString()}</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 pb-2 shrink-0">
+              <button onClick={handleExportExcel} disabled={tabData.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 disabled:opacity-40 transition-colors">
+                <FileSpreadsheet size={12} /> {t('reports.export.excel')}
+              </button>
+              <button onClick={() => window.print()} disabled={tabData.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 disabled:opacity-40 transition-colors">
+                <Printer size={12} /> {t('reports.export.print')}
+              </button>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-700/50">
+                  {[
+                    { key: 'no',        label: t('reports.col.no'),        align: 'left' },
+                    { key: 'date',      label: t('reports.col.date'),      align: 'left' },
+                    { key: 'series',    label: t('reports.col.series'),    align: 'left' },
+                    { key: 'invoiceNo', label: t('reports.col.invoiceNo'), align: 'left' },
+                    { key: 'customer',  label: t('reports.col.customer'),  align: 'left' },
+                    { key: 'netAmount', label: t('reports.col.netAmount'), align: 'right' },
+                    { key: 'taxAmount', label: t('reports.col.taxAmount'), align: 'right' },
+                    { key: 'taxRate',   label: t('reports.col.taxRate'),   align: 'center' },
+                    { key: 'action',    label: t('reports.col.action'),    align: 'left' },
+                  ].map(h => (
+                    <th key={h.key} className={`px-4 py-2.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide whitespace-nowrap text-${h.align}`}>{h.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                {paged.length === 0 && (
+                  <tr><td colSpan={9} className="text-center py-12 text-slate-400 dark:text-slate-500">{t('reports.empty')}</td></tr>
+                )}
+                {paged.map((r, idx) => {
+                  const sap = r._sap
+                  const vatRates = sap ? [...new Set((sap.items || []).map(i => i.vatRate).filter(v=>v!=null))].map(v=>v+'%').join(', ') : '—'
+                  return (
+                    <tr key={r.id}
+                      onClick={() => setSelected(r)}
+                      className={`hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer ${selected?.id === r.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                      <td className="px-4 py-2.5 text-slate-400">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                      <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{r.issue_date || r.signed_at?.slice(0,10) || '—'}</td>
+                      <td className="px-4 py-2.5 font-mono text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                        {r.viettel_series || '—'}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">
+                        {r.viettel_invoice_no || '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300 max-w-[200px]">
+                        <div className="truncate font-medium">{r.customer_name || '—'}</div>
+                        {r.customer_tax_code && <div className="text-[10px] text-slate-400 mt-0.5">MST: {r.customer_tax_code}</div>}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                        {r.status === 'cancelled' ? <span className="text-slate-300 line-through">{fmtN(sap?.totalNetAmount||r.total_amount||0)}</span> : fmtN(sap?.totalNetAmount||r.total_amount||0)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-purple-600 dark:text-purple-400 whitespace-nowrap">
+                        {r.status === 'cancelled' ? '—' : fmtN(sap?.totalTaxAmount||0)}
+                      </td>
+                      <td className="px-4 py-2.5 text-center text-slate-500 whitespace-nowrap">{vatRates}</td>
+                      <td className="px-3 py-2.5">
+                        <button onClick={e => { e.stopPropagation(); setSelected(r) }}
+                          className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-700 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30">
+                          <Eye size={10} /> {t('reports.view')}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+              {paged.length > 0 && (
+                <tfoot>
+                  <tr className="bg-blue-50 dark:bg-blue-900/20 border-t border-blue-100 dark:border-blue-800">
+                    <td colSpan={5} className="px-4 py-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      {t('reports.subtotal')}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-xs font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap">{fmtN(pageHang)}</td>
+                    <td className="px-4 py-2.5 text-right text-xs font-bold text-purple-700 dark:text-purple-300 whitespace-nowrap">{fmtN(pageVAT)}</td>
+                    <td className="px-4 py-2.5 text-center text-xs text-slate-400">{fmtN(pagePayment)} ₫</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {tabData.length > PAGE_SIZE && (
+            <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {t('reports.pagination')
+                  .replace('{start}', (page-1)*PAGE_SIZE+1)
+                  .replace('{end}', Math.min(page*PAGE_SIZE, tabData.length))
+                  .replace('{total}', tabData.length.toLocaleString())}
+              </span>
+              <div className="flex items-center gap-1">
+                <button disabled={page===1} onClick={() => setPage(p=>p-1)}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">‹</button>
+                {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                  const p = totalPages <= 7 ? i+1 : page <= 4 ? i+1 : page+i-3
+                  if (p < 1 || p > totalPages) return null
+                  return (
+                    <button key={p} onClick={() => setPage(p)}
+                      className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${p===page ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
+                      {p}
+                    </button>
+                  )
+                })}
+                <button disabled={page===totalPages} onClick={() => setPage(p=>p+1)}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Detail table */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
-          <div>
-            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Chi tiết hóa đơn</div>
-            <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{periodLabel} · {filtered.length} hóa đơn</div>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400">
-                {['STT','Ký hiệu/Số','Ngày lập','Người mua','Tên đơn vị','MST','DT trước thuế','Thuế GTGT','Tổng TT','Trạng thái'].map(h => (
-                  <th key={h} className="text-left px-4 py-2.5 font-semibold whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-              {filtered.length === 0 && (
-                <tr><td colSpan={10} className="text-center py-10 text-slate-400 dark:text-slate-500">Không có dữ liệu trong kỳ này</td></tr>
-              )}
-              {filtered.map((inv, idx) => {
-                const { subtotal, vat, total } = calcTotals(inv.items)
-                return (
-                  <tr key={inv.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
-                    <td className="px-4 py-2.5 text-slate-400">{idx + 1}</td>
-                    <td className="px-4 py-2.5 font-mono font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
-                      {inv.series}/{inv.status === 'draft' ? '---' : inv.number}
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-500 whitespace-nowrap">{inv.issueDate}</td>
-                    <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300">{inv.buyerName || '—'}</td>
-                    <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300 max-w-[160px] truncate">{inv.customer.name}</td>
-                    <td className="px-4 py-2.5 text-slate-500 font-mono whitespace-nowrap">{inv.customer.taxCode}</td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">{fmtN(subtotal)}</td>
-                    <td className="px-4 py-2.5 text-right text-purple-600 dark:text-purple-400 whitespace-nowrap">{fmtN(vat)}</td>
-                    <td className="px-4 py-2.5 text-right font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap">{fmtN(total)}</td>
-                    <td className="px-4 py-2.5"><Badge status={inv.status} /></td>
-                  </tr>
-                )
-              })}
-            </tbody>
-            {issued.length > 0 && (
-              <tfoot>
-                <tr className="bg-blue-50 dark:bg-blue-900/20 font-semibold text-xs">
-                  <td colSpan={6} className="px-4 py-2.5 text-right text-slate-600 dark:text-slate-300">Tổng cộng (HĐ phát hành):</td>
-                  <td className="px-4 py-2.5 text-right text-slate-800 dark:text-slate-100 whitespace-nowrap">{fmtN(totalRevenue)}</td>
-                  <td className="px-4 py-2.5 text-right text-purple-600 dark:text-purple-400 whitespace-nowrap">{fmtN(totalVAT)}</td>
-                  <td className="px-4 py-2.5 text-right text-blue-700 dark:text-blue-300 whitespace-nowrap">{fmtN(totalAmount)}</td>
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
-    </div>
+      {/* Detail Drawer */}
+      {selected && <InvoiceDetailDrawer record={selected} onClose={() => setSelected(null)} />}
+    </>
   )
 }
 
 // ─────────────────────────────────────────────
 // TAB 2: Báo cáo gửi CQT (Bảng kê HĐ điện tử)
 // ─────────────────────────────────────────────
-function CQTReport({ invoices }) {
-  const [month, setMonth]   = useState('05')
-  const [year, setYear]     = useState('2024')
+function CQTReport({ invoices, issuedHDDT }) {
+  const company = useCompanyStore()
+  const currentYear  = String(new Date().getFullYear())
+  const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0')
+  const [month, setMonth]   = useState(currentMonth)
+  const [year, setYear]     = useState(currentYear)
   const [sending, setSending] = useState(false)
 
+  // Dùng Supabase issued_invoices làm nguồn — lọc theo tháng/năm ký số
   const issued = useMemo(() =>
-    invoices.filter(inv => {
-      if (inv.status !== 'issued' || !inv.issueDate) return false
-      const [y, m] = inv.issueDate.split('-')
-      return y === year && m === month
+    issuedHDDT.filter(r => {
+      const signedAt = r.signed_at || r.issue_date || ''
+      return signedAt.startsWith(`${year}-${month}`)
     }),
-  [invoices, month, year])
+  [issuedHDDT, month, year])
 
-  const totalSubtotal = issued.reduce((s, i) => s + calcTotals(i.items).subtotal, 0)
-  const totalVAT      = issued.reduce((s, i) => s + calcTotals(i.items).vat, 0)
-  const totalAmount   = issued.reduce((s, i) => s + calcTotals(i.items).total, 0)
+  // Enrich với SAP data để lấy totalNetAmount / totalTaxAmount
+  const issuedEnriched = useMemo(() => {
+    const sapMap = new Map(invoices.map(i => [i.sapBillingDoc, i]))
+    return issued.map(r => ({ ...r, _sap: sapMap.get(r.billing_doc) }))
+  }, [issued, invoices])
+
+  const totalSubtotal = issuedEnriched.reduce((s, r) => s + (r._sap?.totalNetAmount   || r.total_amount || 0), 0)
+  const totalVAT      = issuedEnriched.reduce((s, r) => s + (r._sap?.totalTaxAmount   || 0), 0)
+  const totalAmount   = issuedEnriched.reduce((s, r) => s + (r._sap?.totalGrossAmount || r.total_amount || 0), 0)
 
   const periodLabel = `Tháng ${month}/${year}`
 
@@ -287,20 +582,18 @@ function CQTReport({ invoices }) {
   }
 
   const handleExportXML = () => {
-    // Generate minimal XML structure for tax authority
-    const lines = issued.map((inv, i) => {
-      const { subtotal, vat, total } = calcTotals(inv.items)
+    const lines = issuedEnriched.map((r, i) => {
+      const sap = r._sap
       return `  <HoaDon stt="${i + 1}">
-    <KyHieu>${inv.series}</KyHieu>
-    <So>${inv.number}</So>
-    <NgayLap>${inv.issueDate}</NgayLap>
-    <MaSoThue>${inv.customer.taxCode}</MaSoThue>
-    <TenKhachHang>${inv.customer.name}</TenKhachHang>
-    <DoanhThu>${subtotal}</DoanhThu>
-    <ThueSuat>10</ThueSuat>
-    <TienThue>${vat}</TienThue>
-    <TongTien>${total}</TongTien>
-    <MaCQT>${inv.taxAuthorityCode || ''}</MaCQT>
+    <KyHieu>${r.viettel_series || ''}</KyHieu>
+    <So>${r.viettel_invoice_no || ''}</So>
+    <NgayLap>${r.issue_date || ''}</NgayLap>
+    <MaSoThue>${r.customer_tax_code || ''}</MaSoThue>
+    <TenKhachHang>${r.customer_name || ''}</TenKhachHang>
+    <DoanhThu>${sap?.totalNetAmount || r.total_amount || 0}</DoanhThu>
+    <TienThue>${sap?.totalTaxAmount || 0}</TienThue>
+    <TongTien>${sap?.totalGrossAmount || r.total_amount || 0}</TongTien>
+    <MaCQT>${r.viettel_tax_authority_code || ''}</MaCQT>
   </HoaDon>`
     }).join('\n')
 
@@ -311,8 +604,8 @@ function CQTReport({ invoices }) {
     <Nam>${year}</Nam>
   </KyBaoCao>
   <NguoiBan>
-    <Ten>${SELLER.name}</Ten>
-    <MaSoThue>${SELLER.taxCode}</MaSoThue>
+    <Ten>${company.companyName}</Ten>
+    <MaSoThue>${company.taxCode}</MaSoThue>
   </NguoiBan>
   <DanhSachHoaDon>
 ${lines}
@@ -347,8 +640,8 @@ ${lines}
               Theo Nghị định 123/2020/NĐ-CP · Thông tư 78/2021/TT-BTC
             </div>
             <div className="flex items-center gap-4 mt-3 text-xs text-slate-600 dark:text-slate-300">
-              <div><span className="font-semibold">Đơn vị:</span> {SELLER.name}</div>
-              <div><span className="font-semibold">MST:</span> {SELLER.taxCode}</div>
+              <div><span className="font-semibold">Đơn vị:</span> {company.companyName}</div>
+              <div><span className="font-semibold">MST:</span> {company.taxCode}</div>
               <div><span className="font-semibold">Kỳ:</span> {periodLabel}</div>
             </div>
           </div>
@@ -438,45 +731,40 @@ ${lines}
                   </td>
                 </tr>
               )}
-              {issued.map((inv, idx) => {
-                const { subtotal, vat, total } = calcTotals(inv.items)
-                const itemsSummary = inv.items.map(i => i.description).join('; ')
-                const vatRates = [...new Set(inv.items.map(i => i.vatRate + '%'))].join(', ')
-                const rowStyle = { borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }
+              {issuedEnriched.map((r, idx) => {
+                const sap = r._sap
                 const cellStyle = { padding: '8px 10px', verticalAlign: 'middle' }
+                const rowStyle  = { borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }
+                const itemsSummary = sap?.items?.map(i => i.description).filter(Boolean).join('; ') || '—'
+                const vatRates = sap ? [...new Set(sap.items?.map(i => i.vatRate + '%'))].join(', ') : '—'
                 return (
-                  <tr key={inv.id} style={rowStyle}
-                    className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
-                    <td style={cellStyle} className="text-slate-400 dark:text-slate-500">{idx + 1}</td>
-                    <td style={cellStyle} className="text-slate-600 dark:text-slate-300">{inv.templateCode || '01GTKT0/001'}</td>
-                    <td style={cellStyle} className="font-mono text-blue-600 dark:text-blue-400 font-semibold">{inv.series}</td>
-                    <td style={cellStyle} className="font-mono font-bold text-slate-800 dark:text-slate-100">{inv.number}</td>
-                    <td style={cellStyle} className="text-slate-500 dark:text-slate-400 whitespace-nowrap">{inv.issueDate}</td>
-                    <td style={cellStyle} className="text-slate-700 dark:text-slate-200">
-                      <div className="font-medium">{inv.customer.name}</div>
-                      <div style={{ fontSize: 10, color: '#94a3b8' }}>{inv.buyerName}</div>
+                  <tr key={r.id} style={rowStyle} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                    <td style={cellStyle} className="text-slate-400">{idx + 1}</td>
+                    <td style={cellStyle} className="text-slate-600">{r.billing_doc_type || '—'}</td>
+                    <td style={cellStyle} className="font-mono text-blue-600 font-semibold">{r.viettel_series || '—'}</td>
+                    <td style={cellStyle} className="font-mono font-bold text-slate-800">{r.viettel_invoice_no || '—'}</td>
+                    <td style={cellStyle} className="text-slate-500 whitespace-nowrap">{r.issue_date || r.signed_at?.slice(0,10)}</td>
+                    <td style={cellStyle} className="text-slate-700">
+                      <div className="font-medium">{r.customer_name || '—'}</div>
+                      <div style={{ fontSize: 10, color: '#94a3b8' }}>{r.billing_doc}</div>
                     </td>
-                    <td style={cellStyle} className="font-mono text-slate-500 dark:text-slate-400">{inv.customer.taxCode}</td>
+                    <td style={cellStyle} className="font-mono text-slate-500">{r.customer_tax_code || '—'}</td>
                     <td style={{ ...cellStyle, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                      title={itemsSummary} className="text-slate-600 dark:text-slate-300">
-                      {itemsSummary}
+                      title={itemsSummary} className="text-slate-600">{itemsSummary}</td>
+                    <td style={{ ...cellStyle, textAlign: 'right' }} className="font-semibold text-slate-700 whitespace-nowrap">
+                      {fmtN(sap?.totalNetAmount || 0)}
                     </td>
-                    <td style={{ ...cellStyle, textAlign: 'right' }} className="font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
-                      {fmtN(subtotal)}
+                    <td style={{ ...cellStyle, textAlign: 'center' }} className="text-slate-500">{vatRates}</td>
+                    <td style={{ ...cellStyle, textAlign: 'right' }} className="text-purple-600 whitespace-nowrap">
+                      {fmtN(sap?.totalTaxAmount || 0)}
                     </td>
-                    <td style={{ ...cellStyle, textAlign: 'center' }} className="text-slate-500 dark:text-slate-400">{vatRates}</td>
-                    <td style={{ ...cellStyle, textAlign: 'right' }} className="text-purple-600 dark:text-purple-400 whitespace-nowrap">
-                      {fmtN(vat)}
+                    <td style={{ ...cellStyle, textAlign: 'right' }} className="font-bold text-slate-800 whitespace-nowrap">
+                      {fmtN(sap?.totalGrossAmount || r.total_amount || 0)}
                     </td>
-                    <td style={{ ...cellStyle, textAlign: 'right' }} className="font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap">
-                      {fmtN(total)}
+                    <td style={cellStyle} className="font-mono text-[10px] text-blue-600">
+                      {r.viettel_tax_authority_code || <span className="text-slate-300 italic">—</span>}
                     </td>
-                    <td style={cellStyle} className="font-mono text-[10px] text-blue-600 dark:text-blue-400">
-                      {inv.taxAuthorityCode || <span className="text-slate-300 italic">—</span>}
-                    </td>
-                    <td style={cellStyle} className="text-slate-400 dark:text-slate-500 text-[10px]">
-                      {inv.note || ''}
-                    </td>
+                    <td style={cellStyle} className="text-slate-400 text-[10px]"></td>
                   </tr>
                 )
               })}
@@ -515,7 +803,7 @@ ${lines}
             <Building2 size={12} className="text-slate-400 shrink-0 mt-0.5" />
             <div className="text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed">
               Bảng kê hóa đơn điện tử gửi Cơ quan Thuế theo quy định tại Điều 22 Nghị định 123/2020/NĐ-CP.
-              Đơn vị xác nhận toàn bộ {issued.length} hóa đơn trong bảng kê trên là chính xác và đã được ký số bởi {SELLER.name} (MST: {SELLER.taxCode}).
+              Đơn vị xác nhận toàn bộ {issued.length} hóa đơn trong bảng kê trên là chính xác và đã được ký số bởi {company.companyName} (MST: {company.taxCode}).
             </div>
           </div>
         )}
@@ -551,21 +839,30 @@ function ReportPage({ title, subtitle, children }) {
 // Named exports — one per route
 // ─────────────────────────────────────────────
 export function InvoiceReportPage() {
+  const t = useT()
   const { invoices, fetchInvoices } = useInvoiceStore()
-  useEffect(() => { fetchInvoices() }, [])
+  const [issuedHDDT, setIssuedHDDT] = useState([])
+  useEffect(() => {
+    fetchInvoices()
+    getIssuedInvoices({}).then(setIssuedHDDT).catch(() => {})
+  }, [])
   return (
-    <ReportPage title="Tổng hợp hóa đơn" subtitle="Báo cáo hóa đơn điện tử theo kỳ">
-      <InvoiceReport invoices={invoices} />
+    <ReportPage title={t('reports.invoice.title')} subtitle={t('reports.invoice.subtitle')}>
+      <InvoiceReport invoices={invoices} issuedHDDT={issuedHDDT} />
     </ReportPage>
   )
 }
 
 export function CQTReportPage() {
   const { invoices, fetchInvoices } = useInvoiceStore()
-  useEffect(() => { fetchInvoices() }, [])
+  const [issuedHDDT, setIssuedHDDT] = useState([])
+  useEffect(() => {
+    fetchInvoices()
+    getIssuedInvoices({}).then(setIssuedHDDT).catch(() => {})
+  }, [])
   return (
     <ReportPage title="Bảng kê gửi CQT" subtitle="Bảng kê hóa đơn điện tử gửi Cơ quan Thuế">
-      <CQTReport invoices={invoices} />
+      <CQTReport invoices={invoices} issuedHDDT={issuedHDDT} />
     </ReportPage>
   )
 }

@@ -3,10 +3,11 @@
 // Schema:
 //   id uuid PK, created_at timestamptz,
 //   billing_doc text, billing_doc_type text,
-//   issue_date text, signed_at timestamptz,
-//   customer_name text, customer_tax_code text, customer_code text,
+//   issue_date text, due_date text, signed_at timestamptz,
+//   customer_name text, customer_tax_code text, customer_code text, customer_address text,
+//   payment_method text,
 //   delivery_ref text,
-//   total_amount numeric, currency text,
+//   net_amount numeric, tax_amount numeric, total_amount numeric, currency text,
 //   viettel_invoice_no text, viettel_series text, viettel_tax_authority_code text,
 //   status text,   -- 'issued' | 'cancelled'
 //   items jsonb
@@ -18,25 +19,30 @@ const _mockStore = []
 
 export async function saveIssuedInvoice(inv) {
   const record = {
-    billing_doc:               inv.billingDoc,
-    billing_doc_type:          inv.billingDocType || null,
-    issue_date:                inv.issueDate || null,
-    signed_at:                 new Date().toISOString(),
-    customer_name:             inv.customerName || null,
-    customer_tax_code:         inv.customerTaxCode || null,
-    customer_code:             inv.customerCode || null,
-    delivery_ref:              inv.deliveryRef || null,
-    total_amount:              inv.totalAmount || 0,
-    currency:                  inv.currency || 'VND',
-    viettel_invoice_no:        inv.viettelInvoiceNo || null,
-    viettel_series:            inv.viettelSeries || null,
+    billing_doc:                inv.billingDoc,
+    billing_doc_type:           inv.billingDocType || null,
+    issue_date:                 inv.issueDate || null,
+    due_date:                   inv.dueDate || null,
+    signed_at:                  new Date().toISOString(),
+    customer_name:              inv.customerName || null,
+    customer_tax_code:          inv.customerTaxCode || null,
+    customer_code:              inv.customerCode || null,
+    customer_address:           inv.customerAddress || null,
+    payment_method:             inv.paymentMethod || null,
+    delivery_ref:               inv.deliveryRef || null,
+    net_amount:                 inv.netAmount || 0,
+    tax_amount:                 inv.taxAmount || 0,
+    total_amount:               inv.totalAmount || 0,
+    currency:                   inv.currency || 'VND',
+    viettel_invoice_no:         inv.viettelInvoiceNo || null,
+    viettel_series:             inv.viettelSeries || null,
     viettel_tax_authority_code: inv.viettelTaxAuthorityCode || null,
-    status:                    'issued',
-    items:                     inv.items || [],
+    status:                     'issued',
+    items:                      inv.items || [],
   }
 
   if (!isSupabaseConfigured()) {
-    const mock = { id: crypto.randomUUID(), created_at: new Date().toISOString(), ...record }
+    const mock = { id: Math.random().toString(36).slice(2) + Date.now().toString(36), created_at: new Date().toISOString(), ...record }
     _mockStore.unshift(mock)
     return mock
   }

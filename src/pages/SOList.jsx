@@ -79,7 +79,7 @@ export default function SOList() {
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                  Sales Order Integration · SAP_COM_0109
+                  SAP Live
                 </span>
               </div>
             ) : (
@@ -101,22 +101,22 @@ export default function SOList() {
           <WifiOff size={16} className="text-red-400 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold text-red-700 dark:text-red-300">
-              Không thể kết nối SAP S/4HANA
+              {t('soList.errorTitle')}
             </div>
             <div className="text-xs text-red-500 dark:text-red-400 mt-0.5">{error}</div>
             <div className="text-[11px] text-slate-400 font-mono mt-1 truncate">
-              {sapInfo.url || 'Chưa cấu hình Tenant URL'}
+              {sapInfo.url || t('soList.notConfigured')}
               {sapInfo.user ? ` · ${sapInfo.user}` : ''}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={doRefresh}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-700 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors">
-              <RefreshCw size={11} /> Thử lại
+              <RefreshCw size={11} /> {t('soList.retry')}
             </button>
             <button onClick={() => navigate('/settings/sap')}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors">
-              <Settings size={11} /> Cấu hình SAP
+              <Settings size={11} /> {t('soList.configSap')}
             </button>
           </div>
         </div>
@@ -176,34 +176,45 @@ export default function SOList() {
           {/* Table */}
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-slate-400 text-sm">
-              <Loader2 size={16} className="animate-spin" /> Đang tải từ SAP...
+              <Loader2 size={16} className="animate-spin" /> {t('soList.loading')}
             </div>
           ) : (
             <table className="w-full text-sm">
+              <colgroup>
+                <col className="w-8" />
+                <col style={{ width: '120px' }} />
+                <col style={{ width: '220px' }} />
+                <col style={{ width: '108px' }} />
+                <col style={{ width: '120px' }} />
+                <col style={{ width: '110px' }} />
+                <col style={{ width: '150px' }} />
+                <col style={{ width: '100px' }} />
+              </colgroup>
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-700/50 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                  <th className="w-8 px-2 py-2.5" />
-                  <th className="text-left px-4 py-2.5 font-semibold">{t('soList.col.soNumber')}</th>
-                  <th className="text-left px-4 py-2.5 font-semibold">{t('soList.col.customer')}</th>
-                  <th className="text-left px-4 py-2.5 font-semibold">{t('soList.col.soDate')}</th>
-                  <th className="text-left px-4 py-2.5 font-semibold">{t('soList.col.deliveryDate')}</th>
-                  <th className="text-right px-4 py-2.5 font-semibold">{t('soList.col.total')}</th>
-                  <th className="px-4 py-2.5 w-36" />
+                  <th className="px-2 py-2.5" />
+                  <th className="text-left px-3 py-2.5 font-semibold">{t('soList.col.soNumber')}</th>
+                  <th className="text-left px-3 py-2.5 font-semibold">{t('soList.col.customer')}</th>
+                  <th className="text-left px-3 py-2.5 font-semibold">{t('soList.col.soDate')}</th>
+                  <th className="text-left px-3 py-2.5 font-semibold">{t('soList.col.deliveryDate')}</th>
+                  <th className="text-center px-3 py-2.5 font-semibold">{t('soList.col.deliveryStatus')}</th>
+                  <th className="text-right px-3 py-2.5 font-semibold">{t('soList.col.total')}</th>
+                  <th className="px-3 py-2.5" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                 {salesOrders.length === 0 && (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <EmptyState
                         icon={error ? WifiOff : ShoppingCart}
-                        title={error ? 'Không tải được dữ liệu' : 'Không có Sales Order'}
+                        title={error ? t('soList.empty.errorTitle') : t('soList.empty.noData')}
                         description={
                           error
-                            ? 'Kết nối SAP thất bại. Kiểm tra cấu hình trong Settings → SAP.'
+                            ? t('soList.empty.errorDesc')
                             : sapInfo.live
-                              ? 'SAP chưa có SO nào khớp bộ lọc hiện tại.'
-                              : 'Chưa kết nối SAP — đang dùng dữ liệu demo.'
+                              ? t('soList.empty.noMatch')
+                              : t('soList.empty.demo')
                         }
                       />
                     </td>
@@ -223,55 +234,57 @@ export default function SOList() {
                           </button>
                         </td>
                         {/* SO Number */}
-                        <td className="px-4 py-3">
+                        <td className="px-3 py-3">
                           <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">
                             {so.soNumber}
                           </span>
                           {so.note && (
-                            <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[120px]">{so.note}</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[110px]">{so.note}</div>
                           )}
                         </td>
                         {/* Customer */}
-                        <td className="px-4 py-3">
-                          <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-tight">
+                        <td className="px-3 py-3">
+                          <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-tight truncate">
                             {so.customer.name}
                           </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            {so.customer.code && (
-                              <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
-                                BP: {so.customer.code}
-                              </span>
-                            )}
-                            {so.customer.taxCode && (
-                              <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                                MST: {so.customer.taxCode}
-                              </span>
-                            )}
-                          </div>
+                          {so.customer.taxCode && (
+                            <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-mono">
+                              {so.customer.taxCode}
+                            </div>
+                          )}
                         </td>
                         {/* Dates */}
-                        <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{so.soDate}</td>
-                        <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{so.deliveryDate || '—'}</td>
+                        <td className="px-3 py-3 text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap">{so.soDate || '—'}</td>
+                        <td className="px-3 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{so.deliveryDate || '—'}</td>
+                        {/* Delivery Status */}
+                        <td className="px-3 py-3 text-center">
+                          {so.deliveryStatus === 'completed' && (
+                            <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">{t('soList.delivery.completed')}</span>
+                          )}
+                          {so.deliveryStatus === 'partial' && (
+                            <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">{t('soList.delivery.partial')}</span>
+                          )}
+                          {(!so.deliveryStatus || so.deliveryStatus === 'open') && (
+                            <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">{t('soList.delivery.open')}</span>
+                          )}
+                        </td>
                         {/* Amount */}
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-3 py-3 text-right whitespace-nowrap">
                           <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
                             {fmtAmt(total, so.currency)}
                           </span>
-                          {so.currency && so.currency !== 'VND' && (
-                            <div className="text-[10px] text-slate-400 mt-0.5 text-right">{so.currency}</div>
-                          )}
                         </td>
                         {/* Action */}
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-3 py-3 text-right">
                           <div className="flex items-center gap-1 justify-end">
                             <Button icon={Truck} size="xs" variant="ghost"
                               onClick={() => navigate('/deliveries', { state: { soFilter: so.soNumber } })}>
-                              Phiếu giao
+                              {t('soList.deliveryBtn')}
                             </Button>
                             {so.billingStatus !== 'pending' && (
                               <Button icon={FileText} size="xs" variant="ghost"
                                 onClick={() => navigate('/invoices')}>
-                                Hóa đơn
+                                {t('soList.invoiceBtn')}
                               </Button>
                             )}
                           </div>
@@ -281,17 +294,17 @@ export default function SOList() {
                       {/* ── Expanded row ── */}
                       {isExpanded && (
                         <tr>
-                          <td colSpan={7} className="bg-slate-50 dark:bg-slate-900/30 px-8 py-4">
+                          <td colSpan={8} className="bg-slate-50 dark:bg-slate-900/30 px-8 py-4">
                             {/* Header */}
                             <div className="flex items-center justify-between mb-3">
                               <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-2">
-                                Line Items
+                                {t('soList.lineItems')}
                                 <span className="font-mono text-blue-600 dark:text-blue-400">SO {so.soNumber}</span>
                                 {so.note && <span className="font-normal text-slate-400">· {so.note}</span>}
                               </div>
                               {sapInfo.live && (
                                 <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
-                                  <Wifi size={10} /> SAP Live Data
+                                  <Wifi size={10} /> {t('soList.sapLive')}
                                 </div>
                               )}
                             </div>
@@ -332,7 +345,7 @@ export default function SOList() {
                                 <span>{t('soList.payment')}: <strong>{so.paymentMethod}</strong></span>
                                 <span>·</span>
                                 <span>{t('soList.currency')}: <strong>{so.currency}</strong></span>
-                                {so.buyerName && <><span>·</span><span>Buyer: <strong>{so.buyerName}</strong></span></>}
+                                {so.buyerName && <><span>·</span><span>{t('soList.buyer')}: <strong>{so.buyerName}</strong></span></>}
                               </div>
                               <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
                                 {t('soList.total')} {fmtAmt(total, so.currency)}

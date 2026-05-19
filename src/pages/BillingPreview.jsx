@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
-  ArrowLeft, Printer, ShieldCheck, KeyRound, CheckCircle2,
+  ArrowLeft, ArrowRight, Printer, ShieldCheck, KeyRound, CheckCircle2,
   AlertCircle, Mail, Paperclip, Send,
 } from 'lucide-react'
 import { useCompanyStore } from '../store/companyStore'
@@ -9,6 +9,8 @@ import { saveIssuedInvoice, checkAlreadyIssued } from '../services/issuedInvoice
 import { toast } from '../store/toastStore'
 import Topbar from '../components/layout/Topbar'
 import Button from '../components/ui/Button'
+import { useT } from '../i18n'
+import { useNotificationStore } from '../store/notificationStore'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const fmtNum = n => Number(n || 0).toLocaleString('vi-VN')
@@ -206,6 +208,7 @@ export default function BillingPreview() {
   const navigate       = useNavigate()
   const location       = useLocation()
   const company        = useCompanyStore()
+  const t              = useT()
 
   // Invoice data passed from InvoiceList via location.state
   const inv = location.state?.inv
@@ -224,6 +227,8 @@ export default function BillingPreview() {
   }
 
   const alreadyIssued = location.state?.issued === true
+  const bulkQueue     = location.state?.bulkQueue || []
+  const addNotification = useNotificationStore(s => s.add)
 
   const [showSignModal, setShowSignModal] = useState(false)
   const [issued, setIssued]               = useState(alreadyIssued)
@@ -235,9 +240,9 @@ export default function BillingPreview() {
   if (!inv) return (
     <div className="flex flex-col items-center justify-center h-full gap-3 p-12">
       <div className="text-slate-300 dark:text-slate-600 text-5xl">📄</div>
-      <div className="text-slate-500 dark:text-slate-400 font-medium">Không tìm thấy dữ liệu hóa đơn</div>
+      <div className="text-slate-500 dark:text-slate-400 font-medium">{t('preview.notFound')}</div>
       <button onClick={() => navigate('/invoices')} className="text-xs text-blue-600 hover:underline cursor-pointer">
-        ← Quay lại Billing Documents
+        {t('preview.back')}
       </button>
     </div>
   )
@@ -252,23 +257,38 @@ export default function BillingPreview() {
     setShowSignModal(false)
     try {
       await checkAlreadyIssued(inv.sapBillingDoc)
+      // Generate series from billingDocType + year, invoice number from timestamp tail
+      const yr2 = String(new Date().getFullYear()).slice(-2)
+      const mockSeries = `C${yr2}T`
+      const mockInvoiceNo = String(Date.now()).slice(-6)
       await saveIssuedInvoice({
         billingDoc:              inv.sapBillingDoc,
         billingDocType:          inv.billingDocType,
         issueDate:               inv.issueDate,
+        dueDate:                 inv.dueDate,
         customerName:            inv.customer?.name,
         customerTaxCode:         inv.customer?.taxCode,
         customerCode:            inv.customer?.code,
+        customerAddress:         inv.customer?.address,
+        paymentMethod:           inv.paymentMethod,
         deliveryRef:             inv.deliveryRef,
+        netAmount:               subtotal,
+        taxAmount:               vatTotal,
         totalAmount:             total,
         currency:                inv.currency,
-        viettelInvoiceNo:        null,
-        viettelSeries:           null,
+        viettelInvoiceNo:        mockInvoiceNo,
+        viettelSeries:           mockSeries,
         viettelTaxAuthorityCode: taxAuthorityCode,
         items,
       })
       setIssued(true)
       toast.success(`Hóa đơn ${inv.sapBillingDoc} đã ký số và gửi CQT thành công!`)
+      addNotification({
+        type:    'invoice',
+        variant: 'success',
+        title:   `E-Invoice Issued · ${inv.sapBillingDoc}`,
+        body:    `${inv.customer?.name || '—'} · ${fmtNum(total)} ${inv.currency || 'VND'}`,
+      })
     } catch (e) {
       toast.error('Lưu hóa đơn thất bại — ' + e.message)
     }
@@ -278,52 +298,33 @@ export default function BillingPreview() {
     <div className="flex flex-col h-full">
       <Topbar
         title={`Billing Document · ${inv.sapBillingDoc}`}
-        subtitle={`Khách hàng: ${inv.customer?.name || '—'} · Ngày: ${inv.issueDate || '—'}`}
         actions={
           <div className="flex items-center gap-2 no-print">
-            <Button icon={ArrowLeft} size="sm" variant="ghost" onClick={() => navigate('/invoices')}>
-              Quay lại
+            <Button icon={ArrowLeft} size="sm" variant="ghost" onClick={() => navigate(issued ? '/issued-invoices' : '/invoices')}>
+              {t('preview.back')}
             </Button>
             <Button icon={Printer} size="sm" variant="secondary" onClick={() => window.print()}>
-              In / PDF
+              {t('preview.print')}
             </Button>
-            {issued ? (
-              <>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700">
-                  <CheckCircle2 size={13} className="text-emerald-600" />
-                  <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Đã phát hành</span>
-                </div>
-                {alreadyIssued && (
-                  <Button size="sm" variant="secondary" onClick={() => navigate('/issued-invoices')}>
-                    ← Danh sách HĐ
-                  </Button>
-                )}
-              </>
-            ) : (
+            {!issued && (
               <Button icon={ShieldCheck} size="sm" variant="success" onClick={() => setShowSignModal(true)}>
-                Ký số &amp; Phát hành
+                {t('preview.issue')}
+              </Button>
+            )}
+            {issued && bulkQueue.length > 0 && (
+              <Button icon={ArrowRight} size="sm" variant="primary"
+                onClick={() => navigate(`/billing-preview/${bulkQueue[0].sapBillingDoc}`, { state: { inv: bulkQueue[0], bulkQueue: bulkQueue.slice(1) } })}>
+                Next · {bulkQueue[0].sapBillingDoc} ({bulkQueue.length} left)
               </Button>
             )}
           </div>
         }
       />
 
-      {/* Issued success banner */}
-      {issued && (
-        <div className="mx-6 mt-4 flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 no-print">
-          <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-          <div className="flex-1 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
-            Hóa đơn đã được ký số, gửi CQT và lưu vào hệ thống.
-          </div>
-          <button onClick={() => navigate('/issued-invoices')}
-            className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer">
-            Xem Danh sách HĐ →
-          </button>
-        </div>
-      )}
 
       <div className="flex-1 overflow-auto p-6 bg-slate-100 dark:bg-slate-900">
-        <div id="invoice-doc" className="max-w-4xl mx-auto bg-white" style={{ border: '4px solid #2d6a2d', padding: '4px' }}>
+        <div id="invoice-doc" className="max-w-4xl mx-auto bg-white">
+          <div id="invoice-inner" style={{ border: '4px solid #2d6a2d', padding: '4px' }}>
           <div style={{ border: '1.5px solid #2d6a2d', padding: '20px 24px', position: 'relative', overflow: 'hidden' }}>
 
             {/* Watermark — only before issue */}
@@ -343,17 +344,16 @@ export default function BillingPreview() {
               </div>
               <div className="text-center flex-1 px-4">
                 <div className="flex items-center justify-center gap-2">
-                  <span className="font-bold text-xl tracking-wide text-black">HÓA ĐƠN GIÁ TRỊ GIA TĂNG</span>
+                  <span className="font-bold text-xl tracking-wide text-black" style={{ whiteSpace: 'nowrap' }}>HÓA ĐƠN GIÁ TRỊ GIA TĂNG</span>
                   {!issued && (
                     <span style={{ background: '#f59e0b', color: 'white', fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '4px' }}>CHỜ KÝ</span>
                   )}
-                  {issued && (
-                    <span style={{ background: '#22c55e', color: 'white', fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '4px' }}>ĐÃ PHÁT HÀNH</span>
-                  )}
                 </div>
-                <div className="text-xs text-slate-500 mt-0.5">
-                  {issued ? 'Bản thể hiện của hóa đơn điện tử' : <span style={{ color: '#f59e0b', fontStyle: 'italic' }}>Xem lại trước khi ký số</span>}
-                </div>
+                {!issued && (
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    <span style={{ color: '#f59e0b', fontStyle: 'italic' }}>Xem lại trước khi ký số</span>
+                  </div>
+                )}
                 <div className="text-xs text-slate-600 mt-0.5">{formatDate(inv.issueDate)}</div>
                 <div className="text-xs mt-1">
                   <span className="font-semibold">Mã cơ quan thuế: </span>
@@ -537,6 +537,7 @@ export default function BillingPreview() {
               </div>
             </div>
           </div>
+          </div>{/* #invoice-inner */}
         </div>
       </div>
 

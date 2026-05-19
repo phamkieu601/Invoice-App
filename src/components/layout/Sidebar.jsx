@@ -15,7 +15,7 @@ const NavSection = ({ label }) => (
   </div>
 )
 
-const NavItem = ({ to, icon: Icon, label, badge, sub }) => (
+const NavItem = ({ to, icon: Icon, label, sublabel, badge, sub }) => (
   <NavLink
     to={to}
     className={({ isActive }) =>
@@ -27,7 +27,6 @@ const NavItem = ({ to, icon: Icon, label, badge, sub }) => (
       }`
     }
   >
-    {/* Icon container — larger for top-level, smaller for sub */}
     <span className={`flex items-center justify-center rounded-md shrink-0 transition-colors
       ${sub ? 'w-5 h-5' : 'w-7 h-7'}
       ${sub
@@ -39,10 +38,15 @@ const NavItem = ({ to, icon: Icon, label, badge, sub }) => (
       <Icon size={sub ? 13 : 15} />
     </span>
 
-    <span className={`flex-1 ${sub ? 'text-xs' : 'text-sm'}`}>{label}</span>
+    <span className="flex-1 min-w-0">
+      <span className={`block leading-tight ${sub ? 'text-xs' : 'text-sm'}`}>{label}</span>
+      {sublabel && (
+        <span className="block text-[10px] leading-tight mt-0.5 opacity-50 font-normal">{sublabel}</span>
+      )}
+    </span>
 
     {badge != null && (
-      <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
+      <span className="bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none shrink-0">
         {badge}
       </span>
     )}
@@ -51,12 +55,17 @@ const NavItem = ({ to, icon: Icon, label, badge, sub }) => (
 
 function ReportsMenu() {
   const location = useLocation()
+  const t = useT()
   const isReports = location.pathname.startsWith('/reports')
   const [open, setOpen] = useState(isReports)
 
+  const subItems = [
+    { to: '/reports/invoice', icon: FileBarChart2,   labelKey: 'nav.reportInvoice', subKey: 'nav.reportInvoiceSub' },
+    { to: '/reports/cqt',     icon: FileSpreadsheet, labelKey: 'nav.reportCqt',     subKey: 'nav.reportCqtSub' },
+  ]
+
   return (
     <div>
-      {/* Parent toggle button */}
       <button
         onClick={() => setOpen(o => !o)}
         className={`w-full group flex items-center gap-2.5 rounded-lg text-sm font-medium transition-all duration-150 mx-2 px-3 py-2
@@ -70,20 +79,16 @@ function ReportsMenu() {
           ${isReports ? 'bg-blue-700' : 'bg-slate-800 group-hover:bg-slate-700'}`}>
           <BarChart3 size={15} />
         </span>
-        <span className="flex-1 text-left text-sm">Báo cáo</span>
+        <span className="flex-1 text-left text-sm">{t('nav.reports')}</span>
         {open
           ? <ChevronDown size={13} className="shrink-0 opacity-60" />
           : <ChevronRight size={13} className="shrink-0 opacity-60" />
         }
       </button>
 
-      {/* Sub items */}
       {open && (
         <div className="mt-0.5 ml-5 border-l border-slate-700 pl-2 space-y-0.5">
-          {[
-            { to: '/reports/invoice', icon: FileBarChart2, label: 'Tổng hợp hóa đơn' },
-            { to: '/reports/cqt',     icon: FileSpreadsheet, label: 'Bảng kê gửi CQT' },
-          ].map(item => (
+          {subItems.map(item => (
             <NavLink key={item.to} to={item.to}
               className={({ isActive }) =>
                 `flex items-center gap-2 px-2 py-1.5 rounded-md text-xs font-medium transition-colors
@@ -92,7 +97,7 @@ function ReportsMenu() {
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
               }>
               <item.icon size={12} className="shrink-0" />
-              {item.label}
+              {t(item.labelKey)}
             </NavLink>
           ))}
         </div>
@@ -188,7 +193,7 @@ function SettingsNav() {
 export default function Sidebar() {
   const t = useT()
   return (
-    <aside className="w-60 bg-slate-900 text-white flex flex-col shrink-0 h-screen sticky top-0">
+    <aside className="no-print w-60 bg-slate-900 text-white flex flex-col shrink-0 h-screen sticky top-0">
 
       {/* Brand */}
       <div className="px-5 py-4 border-b border-slate-800">
@@ -210,14 +215,12 @@ export default function Sidebar() {
         <NavItem to="/dashboard" icon={LayoutDashboard} label={t('nav.dashboard')} />
         <ReportsMenu />
 
-        <NavSection label="SD — Bán hàng & Phân phối" />
-        <NavItem to="/sales-orders" icon={ShoppingCart} label={t('nav.salesOrders')} />
-        <NavItem to="/deliveries"   icon={Truck}        label={t('nav.deliveryProcessing')} />
-        <NavItem to="/invoices"     icon={FileText}     label="Billing Documents" />
+        <NavSection label={t('nav.sd')} />
+        <NavItem to="/invoices"     icon={FileText}     label={t('nav.invoiceManagement')} />
 
-        <NavSection label="Hóa đơn điện tử" />
-        <NavItem to="/issued-invoices" icon={Receipt}    label="Danh sách hóa đơn" />
-        <NavItem to="/create"          icon={PlusCircle} label="Tạo hóa đơn" />
+        <NavSection label={t('nav.einvoice')} />
+        <NavItem to="/issued-invoices" icon={Receipt}    label={t('nav.issuedInvoices')} />
+        <NavItem to="/create"          icon={PlusCircle} label={t('nav.createInvoice')} />
         <NavItem to="/activity-log"    icon={Activity}   label={t('nav.activityLog')} sub />
 
         <NavSection label={t('nav.system')} />
