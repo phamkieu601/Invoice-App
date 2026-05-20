@@ -1,8 +1,9 @@
-import React from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import React, { useEffect } from 'react'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import Sidebar from './components/layout/Sidebar'
 import ToastContainer from './components/ui/Toast'
 import Dashboard from './pages/Dashboard'
+import Login from './pages/Login'
 import InvoiceList from './pages/InvoiceList'
 import InvoiceCreate from './pages/InvoiceCreate'
 import InvoicePreview from './pages/InvoicePreview'
@@ -17,6 +18,7 @@ import Settings, {
   CQTSettingsPage, SAPSettingsPage, EmailSettingsPage,
   UsersSettingsPage, NotificationsSettingsPage,
 } from './pages/Settings'
+import { useAuthStore } from './store/authStore'
 
 function PlaceholderPage({ title }) {
   return (
@@ -32,12 +34,52 @@ function PlaceholderPage({ title }) {
 }
 
 export default function App() {
+  const location = useLocation()
+  const session = useAuthStore(s => s.session)
+  const initializing = useAuthStore(s => s.initializing)
+
+  useEffect(() => { useAuthStore.getState().init() }, [])
+
+  if (initializing) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900">
+        <div className="text-center">
+          <div className="w-8 h-8 rounded-full border-2 border-blue-600 border-t-transparent animate-spin mx-auto" />
+          <div className="mt-3 text-sm font-medium text-slate-500 dark:text-slate-400">Checking session...</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!session && location.pathname !== '/login') {
+    return (
+      <>
+        <ToastContainer />
+        <Navigate to="/login" replace state={{ from: location }} />
+      </>
+    )
+  }
+
+  if (!session && location.pathname === '/login') {
+    return (
+      <>
+        <ToastContainer />
+        <Login />
+      </>
+    )
+  }
+
+  if (session && location.pathname === '/login') {
+    return <Navigate to="/dashboard" replace />
+  }
+
   return (
     <div className="min-h-screen flex bg-slate-100 dark:bg-slate-900">
       <ToastContainer />
       <Sidebar />
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-100 dark:bg-slate-900">
         <Routes>
+          <Route path="/login" element={<Navigate to="/dashboard" replace />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/sales-orders" element={<SOList />} />

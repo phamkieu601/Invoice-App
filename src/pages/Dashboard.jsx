@@ -91,8 +91,9 @@ function UrgentRow({ label, count, accent, onClick }) {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { invoices, fetchInvoices } = useInvoiceStore()
-  const { dark } = useThemeStore()
+  const invoices = useInvoiceStore(s => s.invoices)
+  const fetchInvoices = useInvoiceStore(s => s.fetchInvoices)
+  const dark = useThemeStore(s => s.dark)
   const navigate = useNavigate()
   const t = useT()
   const [issuedList, setIssuedList] = useState([])

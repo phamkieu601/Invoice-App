@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Search, Eye, RefreshCw, Download, FileText, Activity, WifiOff, Settings, Database, X, ChevronRight, Send, CheckCircle2, Zap } from 'lucide-react'
+import { Search, Eye, RefreshCw, Download, FileText, WifiOff, Settings, Database, X, ChevronRight, Send, CheckCircle2, Zap } from 'lucide-react'
 import BulkSignModal from '../components/invoice/BulkSignModal'
-import { getInvoiceLog } from '../services/invoiceService'
 import { useInvoiceStore } from '../store/invoiceStore'
 import { batchCheckInvoiceStatus, isViettelConfigured } from '../services/viettelService'
 import { getIssuedInvoices } from '../services/issuedInvoiceService'
@@ -43,16 +42,18 @@ export default function InvoiceList() {
   const STATUS_TABS = [
     { value: '',           label: t('invoiceList.tab.all') },
     { value: 'issued',     label: t('invoiceList.tab.issued') },
+    { value: 'notIssued',  label: t('invoiceList.tab.notIssued') },
     { value: 'cancelled',  label: t('invoiceList.tab.cancelled') },
   ]
-  const { invoices, loading, error, fetchInvoices } = useInvoiceStore()
+  const invoices = useInvoiceStore(s => s.invoices)
+  const loading = useInvoiceStore(s => s.loading)
+  const error = useInvoiceStore(s => s.error)
+  const fetchInvoices = useInvoiceStore(s => s.fetchInvoices)
   const location = useLocation()
   const [search, setSearch] = useState(location.state?.deliveryFilter || '')
   const [activeTab, setActiveTab] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
-  const [showLog, setShowLog] = useState(false)
-  const [activityLog] = useState(() => getInvoiceLog())
   const [selectedInv, setSelectedInv] = useState(null)
   const [viettelMap, setViettelMap] = useState(new Map())   // billingDoc → { exists, invoiceNo, ... }
   const [viettelLoading, setViettelLoading] = useState(false)
@@ -63,7 +64,7 @@ export default function InvoiceList() {
   const navigate = useNavigate()
 
   useEffect(() => { setPage(1) }, [search, activeTab])
-  useEffect(() => { fetchInvoices({ search, status: activeTab, deliveryFilter: location.state?.deliveryFilter }) }, [search, activeTab])
+  useEffect(() => { fetchInvoices({ search, deliveryFilter: location.state?.deliveryFilter }) }, [search, location.state?.deliveryFilter])
 
   // Sau khi invoices load xong, check Viettel status cho tất cả billing docs
   useEffect(() => {
@@ -87,25 +88,36 @@ export default function InvoiceList() {
       .catch(() => {})
   }
   useEffect(() => { loadIssuedMap() }, [])
+  useEffect(() => { loadIssuedMap() }, [location.key])
+
+  const isFullyIssued = (inv) => issuedMap.get(inv.sapBillingDoc)?.status === 'issued'
 
   const counts = {
     '': invoices.length,
     draft: invoices.filter(i => i.status === 'draft').length,
-    issued: invoices.filter(i => i.status === 'issued').length,
+    issued: invoices.filter(i => isFullyIssued(i)).length,
+    notIssued: invoices.filter(i => i.status !== 'cancelled' && !isFullyIssued(i)).length,
     cancelled: invoices.filter(i => i.status === 'cancelled').length,
   }
 
-  const pagedInvoices = invoices.slice((page - 1) * pageSize, page * pageSize)
+  const filteredInvoices = invoices.filter(inv => {
+    if (activeTab === 'issued') return isFullyIssued(inv)
+    if (activeTab === 'notIssued') return inv.status !== 'cancelled' && !isFullyIssued(inv)
+    if (activeTab === 'cancelled') return inv.status === 'cancelled'
+    return true
+  })
+
+  const pagedInvoices = filteredInvoices.slice((page - 1) * pageSize, page * pageSize)
 
   const totalRevenue = invoices
-    .filter(i => i.status === 'issued')
+    .filter(i => isFullyIssued(i))
     .reduce((s, inv) => s + getInvoiceTotal(inv), 0)
 
-  const doRefresh = () => { fetchInvoices({ search, status: activeTab }); loadIssuedMap() }
+  const doRefresh = () => { fetchInvoices({ search, deliveryFilter: location.state?.deliveryFilter }); loadIssuedMap() }
 
   // Bulk selection helpers — only issuable (not cancelled, not already issued)
   const issuableOnPage = pagedInvoices.filter(inv =>
-    inv.status !== 'cancelled' && !issuedMap.has(inv.sapBillingDoc)
+    inv.status !== 'cancelled' && !isFullyIssued(inv)
   )
   const allPageChecked = issuableOnPage.length > 0 && issuableOnPage.every(inv => checkedIds.has(inv.sapBillingDoc))
   const somePageChecked = issuableOnPage.some(inv => checkedIds.has(inv.sapBillingDoc))
@@ -219,7 +231,7 @@ export default function InvoiceList() {
           <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
             <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.pending')}</div>
             <div className="text-lg font-bold text-amber-600 dark:text-amber-400">
-              {invoices.filter(i => i.status !== 'cancelled' && !issuedMap.has(i.sapBillingDoc)).length}
+              {invoices.filter(i => i.status !== 'cancelled' && !isFullyIssued(i)).length}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">{t('invoiceList.summary.needsAction')}</div>
           </div>
@@ -273,16 +285,6 @@ export default function InvoiceList() {
             <Button icon={RefreshCw} size="sm" variant="ghost" onClick={doRefresh}>
               {t('topbar.refresh')}
             </Button>
-            {activityLog.length > 0 && (
-              <button onClick={() => setShowLog(v => !v)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                  showLog
-                    ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                    : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
-                }`}>
-                <Activity size={12} /> {t('invoiceList.panel.activityLog').replace('{count}', activityLog.length)}
-              </button>
-            )}
           </div>
 
           {/* Table */}
@@ -330,7 +332,7 @@ export default function InvoiceList() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                {invoices.length === 0 && (
+                {filteredInvoices.length === 0 && (
                   <tr>
                     <td colSpan={9}>
                       <EmptyState
@@ -350,7 +352,7 @@ export default function InvoiceList() {
                 {pagedInvoices.map(inv => {
                   const total = getInvoiceTotal(inv)
                   const isSelected = selectedInv?.id === inv.id
-                  const isIssuable = inv.status !== 'cancelled' && !issuedMap.has(inv.sapBillingDoc)
+                  const isIssuable = inv.status !== 'cancelled' && !isFullyIssued(inv)
                   const isChecked  = checkedIds.has(inv.sapBillingDoc)
                   return (
                     <tr key={inv.id}
@@ -401,9 +403,11 @@ export default function InvoiceList() {
                       <td className="px-4 py-3 text-center">
                         {inv.status === 'cancelled'
                           ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('invoiceList.status.cancelled')}</span>
-                          : issuedMap.has(inv.sapBillingDoc)
+                          : issuedMap.get(inv.sapBillingDoc)?.status === 'issued'
                             ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={9} /> {t('invoiceList.status.issued')}</span>
-                            : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
+                            : issuedMap.get(inv.sapBillingDoc)?.status === 'pending'
+                              ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
+                              : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">{t('invoiceList.status.notIssued')}</span>
                         }
                       </td>
                       <td className="px-4 py-3">
@@ -418,7 +422,7 @@ export default function InvoiceList() {
                           >
                             <Eye size={11} /> {t('invoiceList.details')}
                           </button>
-                          {inv.status !== 'cancelled' && !issuedMap.has(inv.sapBillingDoc) && (
+                          {inv.status !== 'cancelled' && !isFullyIssued(inv) && (
                             <button
                               onClick={e => { e.stopPropagation(); navigate(`/billing-preview/${inv.sapBillingDoc}`, { state: { inv } }) }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-sm cursor-pointer"
@@ -465,12 +469,12 @@ export default function InvoiceList() {
             </div>
           )}
 
-          {invoices.length > 0 && (
+          {filteredInvoices.length > 0 && (
             <div className="px-5 py-2 border-t border-slate-100 dark:border-slate-700">
               <Pagination
                 page={page}
                 pageSize={pageSize}
-                total={invoices.length}
+                total={filteredInvoices.length}
                 onPageChange={setPage}
                 onPageSizeChange={setPageSize}
               />
@@ -478,43 +482,13 @@ export default function InvoiceList() {
           )}
         </div>
 
-        {/* Activity Log */}
-        {showLog && activityLog.length > 0 && (
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-slate-100 dark:border-slate-700">
-              <Activity size={14} className="text-blue-600 dark:text-blue-400" />
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t('invoiceList.activityTitle')}</span>
-              <span className="ml-auto text-[10px] text-slate-400">{activityLog.length} {t('invoiceList.panel.events')}</span>
-            </div>
-            <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
-              {activityLog.slice(0, 20).map((log, i) => {
-                const typeMap = {
-                  create: { label: t('invoiceList.log.create'), color: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' },
-                  issue:  { label: t('invoiceList.log.issue'),  color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30' },
-                  cancel: { label: t('invoiceList.log.cancel'), color: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30' },
-                }
-                const logEntry = typeMap[log.type] || { label: log.type, color: 'text-slate-500 bg-slate-100' }
-                return (
-                  <div key={i} className="flex items-center gap-4 px-5 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${logEntry.color}`}>{logEntry.label}</span>
-                    <span className="font-mono text-xs text-blue-600 dark:text-blue-400 shrink-0">{log.invoiceId}</span>
-                    {log.customer && <span className="text-xs text-slate-600 dark:text-slate-300 truncate flex-1">{log.customer}</span>}
-                    {log.soRef && <span className="text-[11px] text-slate-400 shrink-0">SO {log.soRef}</span>}
-                    {log.number && <span className="text-[11px] text-slate-400 shrink-0 font-mono">#{log.number}</span>}
-                    <span className="text-[11px] text-slate-400 shrink-0 font-mono ml-auto">{new Date(log.time).toLocaleString('vi-VN')}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Bulk Sign Modal ──────────────────────────────────────── */}
       {bulkSignOpen && (
         <BulkSignModal
           invoices={checkedInvoices}
-          onClose={() => setBulkSignOpen(false)}
+          onClose={() => { setBulkSignOpen(false); loadIssuedMap() }}
           onComplete={() => {
             setBulkSignOpen(false)
             setCheckedIds(new Set())
@@ -537,9 +511,11 @@ export default function InvoiceList() {
                   <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">{selectedInv.sapBillingDoc}</span>
                   {selectedInv.status === 'cancelled'
                     ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('invoiceList.status.cancelled')}</span>
-                    : issuedMap.has(selectedInv.sapBillingDoc)
+                    : issuedMap.get(selectedInv.sapBillingDoc)?.status === 'issued'
                       ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={9} /> {t('invoiceList.status.issued')}</span>
-                      : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
+                      : issuedMap.get(selectedInv.sapBillingDoc)?.status === 'pending'
+                        ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
+                        : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">{t('invoiceList.status.notIssued')}</span>
                   }
                   {selectedInv.billingDocType && (
                     <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">{selectedInv.billingDocType}</span>
@@ -647,7 +623,7 @@ export default function InvoiceList() {
                 <div className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 rounded-xl">
                   {t('invoiceList.panel.cancelled')}
                 </div>
-              ) : issuedMap.has(selectedInv.sapBillingDoc) ? (
+              ) : isFullyIssued(selectedInv) ? (
                 <button
                   onClick={() => { setSelectedInv(null); navigate(`/billing-preview/${selectedInv.sapBillingDoc}`, { state: { inv: selectedInv, issued: true } }) }}
                   className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl transition-colors cursor-pointer"

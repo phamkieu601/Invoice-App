@@ -9,7 +9,10 @@ const ICONS = {
 }
 
 function NotificationDropdown({ onClose }) {
-  const { notifications, markAllRead, remove, clearAll } = useNotificationStore()
+  const notifications = useNotificationStore(s => s.notifications)
+  const markAllRead = useNotificationStore(s => s.markAllRead)
+  const remove = useNotificationStore(s => s.remove)
+  const clearAll = useNotificationStore(s => s.clearAll)
   const unread = notifications.filter(n => !n.read).length
 
   const fmtTime = iso => {
@@ -99,8 +102,10 @@ function NotificationDropdown({ onClose }) {
 }
 
 export default function Topbar({ title, subtitle, actions }) {
-  const { dark, toggle: toggleTheme } = useThemeStore()
-  const { notifications, markAllRead } = useNotificationStore()
+  const dark = useThemeStore(s => s.dark)
+  const toggleTheme = useThemeStore(s => s.toggle)
+  const notifications = useNotificationStore(s => s.notifications)
+  const markAllRead = useNotificationStore(s => s.markAllRead)
   const unread = notifications.filter(n => !n.read).length
   const [open, setOpen] = useState(false)
   const ref = useRef(null)

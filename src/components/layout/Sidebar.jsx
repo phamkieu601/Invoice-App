@@ -1,12 +1,13 @@
 import React, { useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, FileText, ShoppingCart, PlusCircle,
   BarChart3, Receipt, ChevronRight, ChevronDown,
   FileBarChart2, FileSpreadsheet, Activity, Truck,
-  Palette, Building2, Plug2, Database, Mail, Users, Bell,
+  Palette, Building2, Plug2, Database, Mail, Users, Bell, LogOut,
 } from 'lucide-react'
 import { useT } from '../../i18n'
+import { useAuthStore } from '../../store/authStore'
 
 const NavSection = ({ label }) => (
   <div className="px-4 pt-5 pb-1.5 flex items-center gap-2">
@@ -192,6 +193,17 @@ function SettingsNav() {
 
 export default function Sidebar() {
   const t = useT()
+  const navigate = useNavigate()
+  const session = useAuthStore(s => s.session)
+  const logout = useAuthStore(s => s.logout)
+  const user = session?.user
+  const initial = (user?.name || user?.email || 'A').trim().charAt(0).toUpperCase()
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <aside className="no-print w-60 bg-slate-900 text-white flex flex-col shrink-0 h-screen sticky top-0">
 
@@ -230,15 +242,21 @@ export default function Sidebar() {
 
       {/* User */}
       <div className="px-3 py-3 border-t border-slate-800">
-        <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors">
+        <div className="flex items-center gap-3 px-2 py-2 rounded-lg bg-slate-950/20">
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-xs font-bold text-white shrink-0 shadow">
-            A
+            {initial}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold text-slate-200 truncate">Admin ABEO</div>
-            <div className="text-[10px] text-slate-500 truncate">admin@abeo.vn</div>
+            <div className="text-xs font-semibold text-slate-200 truncate">{user?.name || 'Admin ABEO'}</div>
+            <div className="text-[10px] text-slate-500 truncate">{user?.email || 'admin@abeo.vn'}</div>
           </div>
-          <ChevronRight size={13} className="text-slate-600 shrink-0" />
+          <button
+            onClick={handleLogout}
+            className="p-1.5 rounded-md text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+            title="Logout"
+          >
+            <LogOut size={13} />
+          </button>
         </div>
         <div className="text-[10px] text-center text-slate-700 mt-2 font-medium">v2.0.0 · SAP Mock Mode</div>
       </div>

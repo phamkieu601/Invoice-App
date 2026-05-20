@@ -37,7 +37,7 @@ export async function saveIssuedInvoice(inv) {
     viettel_invoice_no:         inv.viettelInvoiceNo || null,
     viettel_series:             inv.viettelSeries || null,
     viettel_tax_authority_code: inv.viettelTaxAuthorityCode || null,
-    status:                     'issued',
+    status:                     inv.status || 'pending',
     items:                      inv.items || [],
   }
 
@@ -47,14 +47,32 @@ export async function saveIssuedInvoice(inv) {
     return mock
   }
 
-  const { data, error } = await supabase
+  const { data: existing } = await supabase
     .from('issued_invoices')
-    .insert(record)
-    .select()
-    .single()
+    .select('id')
+    .eq('billing_doc', record.billing_doc)
+    .maybeSingle()
 
-  if (error) throw new Error(error.message)
-  return data
+  let result
+  if (existing?.id) {
+    const { data, error } = await supabase
+      .from('issued_invoices')
+      .update(record)
+      .eq('id', existing.id)
+      .select()
+      .single()
+    if (error) throw new Error(error.message)
+    result = data
+  } else {
+    const { data, error } = await supabase
+      .from('issued_invoices')
+      .insert(record)
+      .select()
+      .single()
+    if (error) throw new Error(error.message)
+    result = data
+  }
+  return result
 }
 
 export async function getIssuedInvoices({ search = '' } = {}) {
@@ -83,6 +101,22 @@ export async function getIssuedInvoices({ search = '' } = {}) {
   const { data, error } = await query
   if (error) throw new Error(error.message)
   return data || []
+}
+
+export async function updateInvoiceStatus(billingDoc, status) {
+  if (!isSupabaseConfigured()) {
+    const rec = _mockStore.find(r => r.billing_doc === billingDoc)
+    if (rec) rec.status = status
+    return
+  }
+
+  const { error } = await supabase
+    .from('issued_invoices')
+    .update({ status })
+    .eq('billing_doc', billingDoc)
+    .neq('status', 'cancelled')
+
+  if (error) throw new Error(error.message)
 }
 
 export async function checkAlreadyIssued(billingDoc) {

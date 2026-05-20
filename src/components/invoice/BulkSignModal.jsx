@@ -64,19 +64,15 @@ export default function BulkSignModal({ invoices, onClose, onComplete }) {
     for (let i = 0; i < invoices.length; i++) {
       setCurrentIdx(i)
       const inv = invoices[i]
-      try {
-        await checkAlreadyIssued(inv.sapBillingDoc)
-        await new Promise(r => setTimeout(r, 1200)) // simulate signing
-        const yr2          = String(new Date().getFullYear()).slice(-2)
-        const mockSeries   = `C${yr2}T`
-        const mockNo       = String(Date.now()).slice(-6)
-        const taxCode      = `${new Date().getFullYear()}${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}VN`
-        const items        = inv.items || []
-        const subtotal     = items.reduce((s, it) => s + (it.netAmount ?? it.qty * it.unitPrice), 0)
-        const vatTotal     = items.reduce((s, it) => s + (it.taxAmount ?? it.qty * it.unitPrice * (it.vatRate / 100)), 0)
-        const total        = inv.totalGrossAmount ?? (subtotal + vatTotal)
-
-        await saveIssuedInvoice({
+      const yr2        = String(new Date().getFullYear()).slice(-2)
+        const mockSeries = `C${yr2}T`
+        const mockNo     = String(Date.now()).slice(-6)
+        const taxCode    = `${new Date().getFullYear()}${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}VN`
+        const items      = inv.items || []
+        const subtotal   = items.reduce((s, it) => s + (it.netAmount ?? it.qty * it.unitPrice), 0)
+        const vatTotal   = items.reduce((s, it) => s + (it.taxAmount ?? it.qty * it.unitPrice * (it.vatRate / 100)), 0)
+        const total      = inv.totalGrossAmount ?? (subtotal + vatTotal)
+        const payload    = {
           billingDoc:              inv.sapBillingDoc,
           billingDocType:          inv.billingDocType,
           issueDate:               inv.issueDate,
@@ -95,8 +91,11 @@ export default function BulkSignModal({ invoices, onClose, onComplete }) {
           viettelSeries:           mockSeries,
           viettelTaxAuthorityCode: taxCode,
           items,
-        })
-
+        }
+      try {
+        await checkAlreadyIssued(inv.sapBillingDoc)
+        await new Promise(r => setTimeout(r, 1200)) // simulate signing
+        await saveIssuedInvoice({ ...payload, status: 'issued' })
         addNotification({
           type: 'invoice', variant: 'success',
           title: `E-Invoice Issued · ${inv.sapBillingDoc}`,
@@ -104,6 +103,7 @@ export default function BulkSignModal({ invoices, onClose, onComplete }) {
         })
         acc.push({ inv, status: 'success', total })
       } catch (e) {
+        try { await saveIssuedInvoice({ ...payload, status: 'pending' }) } catch (_) {}
         acc.push({ inv, status: 'error', error: e.message })
       }
       setResults([...acc])

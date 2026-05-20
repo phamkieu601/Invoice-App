@@ -60,14 +60,43 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
   const [selectedCert, setSelectedCert] = useState(MOCK_CERTS[0].id)
   const [pin, setPin]           = useState('')
   const [pinError, setPinError] = useState('')
+  const [pinWarning, setPinWarning] = useState('')
+  const [failCount, setFailCount]   = useState(0)
+  const [locked, setLocked]         = useState(false)
   const [step, setStep]         = useState('select') // select | confirm | signing
 
   const cert = MOCK_CERTS.find(c => c.id === selectedCert)
   const daysLeft = cert ? Math.ceil((new Date(cert.validTo) - new Date()) / 86400000) : 0
 
+  const CORRECT_PIN = '1234'
+  const MAX_ATTEMPTS = 3
+
   const handleNext = () => {
+    if (locked) return
     if (!pin || pin.length < 4) { setPinError('PIN phải có ít nhất 4 ký tự'); return }
+    if (pin !== CORRECT_PIN) {
+      const next = failCount + 1
+      setFailCount(next)
+      setPin('')
+      if (next >= MAX_ATTEMPTS) {
+        setLocked(true)
+        setPinError('')
+        setPinWarning('')
+        return
+      }
+      const remaining = MAX_ATTEMPTS - next
+      if (remaining === 1) {
+        setPinWarning(`🚨 Cảnh báo nghiêm trọng: Còn ${remaining} lần thử. Token sẽ bị khóa nếu nhập sai thêm!`)
+      } else if (remaining === 2) {
+        setPinWarning(`⚠️ Cảnh báo: PIN không đúng. Còn ${remaining} lần thử.`)
+      } else {
+        setPinWarning('')
+      }
+      setPinError('PIN không đúng. Vui lòng thử lại.')
+      return
+    }
     setPinError('')
+    setPinWarning('')
     setStep('confirm')
   }
 
@@ -135,11 +164,20 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
                 <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5 block">
                   <KeyRound size={12} className="inline mr-1" />PIN / Mật khẩu token
                 </label>
-                <input type="password" value={pin} onChange={e => { setPin(e.target.value); setPinError('') }}
-                  placeholder="Nhập PIN chứng thư số..."
-                  className="w-full border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  onKeyDown={e => e.key === 'Enter' && handleNext()} />
-                {pinError && <div className="text-xs text-red-500 mt-1 flex items-center gap-1"><AlertCircle size={11} />{pinError}</div>}
+                {locked ? (
+                  <div className="w-full rounded-lg px-4 py-3 bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 text-xs font-semibold flex items-center gap-2">
+                    <AlertCircle size={14} /> Token đã bị khóa do nhập sai PIN {MAX_ATTEMPTS} lần. Vui lòng liên hệ quản trị viên để mở khóa.
+                  </div>
+                ) : (
+                  <>
+                    <input type="password" value={pin} onChange={e => { setPin(e.target.value); setPinError(''); setPinWarning('') }}
+                      placeholder="Nhập PIN chứng thư số..."
+                      className="w-full border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onKeyDown={e => e.key === 'Enter' && handleNext()} />
+                    {pinError && <div className="text-xs text-red-500 mt-1 flex items-center gap-1"><AlertCircle size={11} />{pinError}</div>}
+                    {pinWarning && <div className={`text-xs mt-1.5 px-3 py-2 rounded-lg flex items-start gap-1.5 ${failCount >= 4 ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-semibold' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'}`}>{pinWarning}</div>}
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -191,7 +229,8 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
               {step === 'confirm' ? 'Quay lại' : 'Hủy'}
             </button>
             <button onClick={step === 'select' ? handleNext : handleSign}
-              className="px-5 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors flex items-center gap-2 cursor-pointer">
+              disabled={step === 'select' && locked}
+              className="px-5 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
               <ShieldCheck size={14} />
               {step === 'select' ? 'Tiếp theo' : 'Xác nhận ký số'}
             </button>
@@ -339,32 +378,32 @@ export default function BillingPreview() {
 
   const handleSignConfirmed = async ({ cert }) => {
     setShowSignModal(false)
+    const yr2 = String(new Date().getFullYear()).slice(-2)
+    const mockSeries = `C${yr2}T`
+    const mockInvoiceNo = String(Date.now()).slice(-6)
+    const invoicePayload = {
+      billingDoc:              inv.sapBillingDoc,
+      billingDocType:          inv.billingDocType,
+      issueDate:               inv.issueDate,
+      dueDate:                 inv.dueDate,
+      customerName:            inv.customer?.name,
+      customerTaxCode:         inv.customer?.taxCode,
+      customerCode:            inv.customer?.code,
+      customerAddress:         inv.customer?.address,
+      paymentMethod:           inv.paymentMethod,
+      deliveryRef:             inv.deliveryRef,
+      netAmount:               subtotal,
+      taxAmount:               vatTotal,
+      totalAmount:             total,
+      currency:                inv.currency,
+      viettelInvoiceNo:        mockInvoiceNo,
+      viettelSeries:           mockSeries,
+      viettelTaxAuthorityCode: taxAuthorityCode,
+      items,
+    }
     try {
       await checkAlreadyIssued(inv.sapBillingDoc)
-      // Generate series from billingDocType + year, invoice number from timestamp tail
-      const yr2 = String(new Date().getFullYear()).slice(-2)
-      const mockSeries = `C${yr2}T`
-      const mockInvoiceNo = String(Date.now()).slice(-6)
-      await saveIssuedInvoice({
-        billingDoc:              inv.sapBillingDoc,
-        billingDocType:          inv.billingDocType,
-        issueDate:               inv.issueDate,
-        dueDate:                 inv.dueDate,
-        customerName:            inv.customer?.name,
-        customerTaxCode:         inv.customer?.taxCode,
-        customerCode:            inv.customer?.code,
-        customerAddress:         inv.customer?.address,
-        paymentMethod:           inv.paymentMethod,
-        deliveryRef:             inv.deliveryRef,
-        netAmount:               subtotal,
-        taxAmount:               vatTotal,
-        totalAmount:             total,
-        currency:                inv.currency,
-        viettelInvoiceNo:        mockInvoiceNo,
-        viettelSeries:           mockSeries,
-        viettelTaxAuthorityCode: taxAuthorityCode,
-        items,
-      })
+      await saveIssuedInvoice({ ...invoicePayload, status: 'issued' })
       setIssued(true)
       toast.success(`Hóa đơn ${inv.sapBillingDoc} đã ký số và gửi CQT thành công!`)
       addNotification({
@@ -374,6 +413,7 @@ export default function BillingPreview() {
         body:    `${inv.customer?.name || '—'} · ${fmtNum(total)} ${inv.currency || 'VND'}`,
       })
     } catch (e) {
+      try { await saveIssuedInvoice({ ...invoicePayload, status: 'pending' }) } catch (_) {}
       toast.error('Lưu hóa đơn thất bại — ' + e.message)
     }
   }
@@ -434,15 +474,7 @@ export default function BillingPreview() {
               <div className="text-center flex-1 px-4">
                 <div className="flex items-center justify-center gap-2">
                   <span className="font-bold text-xl tracking-wide text-black" style={{ whiteSpace: 'nowrap' }}>HÓA ĐƠN GIÁ TRỊ GIA TĂNG</span>
-                  {!issued && (
-                    <span style={{ background: '#f59e0b', color: 'white', fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '4px' }}>CHỜ KÝ</span>
-                  )}
                 </div>
-                {!issued && (
-                  <div className="text-xs text-slate-500 mt-0.5">
-                    <span style={{ color: '#f59e0b', fontStyle: 'italic' }}>Xem lại trước khi ký số</span>
-                  </div>
-                )}
                 <div className="text-xs text-slate-600 mt-0.5">{formatDate(inv.issueDate)}</div>
                 <div className="text-xs mt-1">
                   <span className="font-semibold">Mã cơ quan thuế: </span>

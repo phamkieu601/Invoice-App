@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { getIssuedInvoices } from '../services/issuedInvoiceService'
 import { isSupabaseConfigured } from '../lib/supabase'
+import { useInvoiceStore } from '../store/invoiceStore'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Pagination from '../components/ui/Pagination'
@@ -15,18 +16,20 @@ import { useT } from '../i18n'
 const fmt = (n, currency = 'VND') => {
   const num = Number(n || 0)
   if (currency === 'USD') return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2 })
-  if (currency === 'EUR') return '€' + num.toLocaleString('de-DE', { minimumFractionDigits: 2 })
+  if (currency === 'EUR') return 'EUR ' + num.toLocaleString('de-DE', { minimumFractionDigits: 2 })
   return num.toLocaleString('vi-VN') + ' ' + (currency || 'VND')
 }
 
 const fmtDate = iso => {
-  if (!iso) return '—'
+  if (!iso) return '-'
   try { return new Date(iso).toLocaleDateString('vi-VN') } catch { return iso }
 }
 
 export default function IssuedInvoiceList() {
   const navigate = useNavigate()
   const t = useT()
+  const sapInvoices = useInvoiceStore(s => s.invoices)
+  const fetchInvoices = useInvoiceStore(s => s.fetchInvoices)
   const [invoices, setInvoices]   = useState([])
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState(null)
@@ -47,8 +50,10 @@ export default function IssuedInvoiceList() {
   }, [search])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { fetchInvoices({}) }, [fetchInvoices])
   useEffect(() => { setPage(1) }, [search])
 
+  const sapByBillingDoc = new Map(sapInvoices.map(inv => [inv.sapBillingDoc, inv]))
   const paged = invoices.slice((page - 1) * pageSize, page * pageSize)
 
   return (
@@ -144,7 +149,34 @@ export default function IssuedInvoiceList() {
                     </td>
                   </tr>
                 )}
-                {!loading && paged.map(inv => (
+                {!loading && paged.map(inv => {
+                  const sapInv = sapByBillingDoc.get(inv.billing_doc)
+                  const customer = {
+                    name:    inv.customer_name || sapInv?.customer?.name || '',
+                    taxCode: inv.customer_tax_code || sapInv?.customer?.taxCode || '',
+                    code:    inv.customer_code || sapInv?.customer?.code || '',
+                    address: inv.customer_address || sapInv?.customer?.address || '',
+                    phone:   sapInv?.customer?.phone || '',
+                    email:   sapInv?.customer?.email || '',
+                    bankAccount: sapInv?.customer?.bankAccount || '',
+                    bankName:    sapInv?.customer?.bankName || '',
+                  }
+                  const previewInv = {
+                    ...(sapInv || {}),
+                    sapBillingDoc:     inv.billing_doc,
+                    billingDocType:    inv.billing_doc_type || sapInv?.billingDocType,
+                    issueDate:         inv.issue_date || sapInv?.issueDate,
+                    dueDate:           inv.due_date || sapInv?.dueDate || null,
+                    currency:          inv.currency || sapInv?.currency || 'VND',
+                    deliveryRef:       inv.delivery_ref || sapInv?.deliveryRef,
+                    paymentMethod:     inv.payment_method || sapInv?.paymentMethod || null,
+                    totalGrossAmount:  inv.total_amount || sapInv?.totalGrossAmount,
+                    buyerName:         sapInv?.buyerName || '',
+                    customer,
+                    items:             inv.items?.length ? inv.items : (sapInv?.items || []),
+                  }
+
+                  return (
                   <tr key={inv.id}
                     className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">
@@ -164,24 +196,24 @@ export default function IssuedInvoiceList() {
                           )}
                         </div>
                       ) : (
-                        <span className="text-slate-400 text-xs">—</span>
+                        <span className="text-slate-400 text-xs">-</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                        {inv.customer_name || inv.customer_code || '—'}
+                        {customer.name || customer.code || '-'}
                       </div>
-                      {inv.customer_tax_code && (
-                        <div className="text-[10px] text-slate-400 mt-0.5">MST: {inv.customer_tax_code}</div>
+                      {customer.taxCode && (
+                        <div className="text-[10px] text-slate-400 mt-0.5">MST: {customer.taxCode}</div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                      {inv.issue_date || '—'}
+                      {inv.issue_date || '-'}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
                       {inv.signed_at
                         ? new Date(inv.signed_at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })
-                        : '—'}
+                        : '-'}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
@@ -200,22 +232,7 @@ export default function IssuedInvoiceList() {
                       <button
                         onClick={() => navigate(`/billing-preview/${inv.billing_doc}`, {
                           state: {
-                            inv: {
-                              sapBillingDoc:  inv.billing_doc,
-                              billingDocType: inv.billing_doc_type,
-                              issueDate:      inv.issue_date,
-                              dueDate:        null,
-                              currency:       inv.currency || 'VND',
-                              deliveryRef:    inv.delivery_ref,
-                              paymentMethod:  null,
-                              totalGrossAmount: inv.total_amount,
-                              customer: {
-                                name:    inv.customer_name,
-                                taxCode: inv.customer_tax_code,
-                                code:    inv.customer_code,
-                              },
-                              items: inv.items || [],
-                            },
+                            inv: previewInv,
                             issued: true,
                             taxAuthorityCode: inv.viettel_tax_authority_code,
                           },
@@ -226,7 +243,8 @@ export default function IssuedInvoiceList() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -246,3 +264,4 @@ export default function IssuedInvoiceList() {
     </div>
   )
 }
+

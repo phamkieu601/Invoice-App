@@ -65,7 +65,8 @@ function ToastItem({ toast, onRemove }) {
 }
 
 export default function ToastContainer() {
-  const { toasts, remove } = useToastStore()
+  const toasts = useToastStore(s => s.toasts)
+  const remove = useToastStore(s => s.remove)
 
   return (
     <div className="fixed bottom-6 right-6 flex flex-col gap-2.5 z-[9999] no-print">
