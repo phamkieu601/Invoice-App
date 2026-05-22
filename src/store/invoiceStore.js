@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getInvoices, getInvoiceById, createInvoice, issueInvoice, cancelInvoice } from '../services/invoiceService'
+import { getInvoices, getInvoiceById, createInvoice, issueInvoice, cancelInvoice } from '../services/sap/invoiceService'
 
 export const useInvoiceStore = create((set, get) => ({
   invoices: [],

@@ -120,6 +120,7 @@ const translations = {
     'invoiceList.tab.all': 'All',
     'invoiceList.tab.draft': 'Not Issued',
     'invoiceList.tab.issued': 'E-Invoice Issued',
+    'invoiceList.tab.signingFailed': 'Signing Failed',
     'invoiceList.tab.notIssued': 'Not Issued',
     'invoiceList.tab.cancelled': 'Cancelled',
     'invoiceList.search': 'Search by sold-to party, billing doc, tax no...',
@@ -569,8 +570,8 @@ const translations = {
     // InvoiceList — panel buyer detail fields
     'invoiceList.panel.custCode': 'Customer Code',
     'invoiceList.panel.taxCode': 'Tax No. (TIN):',
-    'invoiceList.panel.address': 'Address:',
-    'invoiceList.panel.phone': 'Phone:',
+    'invoiceList.panel.address': 'Address',
+    'invoiceList.panel.phone': 'Phone',
     // InvoiceList — panel doc info fields
     'invoiceList.panel.docField.billingDoc': 'Billing Document',
     'invoiceList.panel.docField.docType': 'Document Type',
@@ -714,6 +715,7 @@ const translations = {
     'invoiceList.tab.all': 'Tất cả',
     'invoiceList.tab.draft': 'Chưa phát hành',
     'invoiceList.tab.issued': 'Đã phát hành HĐĐT',
+    'invoiceList.tab.signingFailed': 'Ký thất bại',
     'invoiceList.tab.notIssued': 'Chưa phát hành',
     'invoiceList.tab.cancelled': 'Đã hủy',
     'invoiceList.search': 'Tìm billing doc, khách hàng (Sold-to), MST...',
@@ -1084,8 +1086,8 @@ const translations = {
     // InvoiceList — panel buyer detail fields
     'invoiceList.panel.custCode': 'Mã KH:',
     'invoiceList.panel.taxCode': 'MST:',
-    'invoiceList.panel.address': 'Địa chỉ:',
-    'invoiceList.panel.phone': 'Điện thoại:',
+    'invoiceList.panel.address': 'Địa chỉ',
+    'invoiceList.panel.phone': 'Điện thoại',
     // InvoiceList — panel doc info fields
     'invoiceList.panel.docField.billingDoc': 'Billing Document',
     'invoiceList.panel.docField.docType': 'Loại chứng từ',

@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Printer, Send, XCircle, ShieldCheck, KeyRound, CheckCircle2, AlertCircle, ChevronDown, Mail, Paperclip } from 'lucide-react'
-import { useInvoiceStore } from '../store/invoiceStore'
-import { useCompanyStore } from '../store/companyStore'
-import { calcTotals } from '../services/mockData'
-import { toast } from '../store/toastStore'
-import Badge from '../components/ui/Badge'
-import Button from '../components/ui/Button'
-import Topbar from '../components/layout/Topbar'
+import { useInvoiceStore } from '../../store/invoiceStore'
+import { useCompanyStore } from '../../store/companyStore'
+import { calcTotals } from '../../services/sap/mockData'
+import { toast } from '../../store/toastStore'
+import Badge from '../../components/ui/Badge'
+import Button from '../../components/ui/Button'
+import Topbar from '../../components/layout/Topbar'
 
 const EMAILJS_SERVICE_ID  = import.meta.env.VITE_EMAILJS_SERVICE_ID
 const EMAILJS_TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID

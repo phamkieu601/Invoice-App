@@ -1,3 +1,30 @@
+// ── Mail sent ──────────────────────────────────────────────────────────────
+export async function setMailSent(billingDoc, sentAt = new Date().toISOString()) {
+  if (!isSupabaseConfigured()) {
+    const rec = _mockStore.find(r => r.billing_doc === billingDoc)
+    if (rec) rec.mail_sent_at = sentAt
+    return
+  }
+  const { error } = await supabase
+    .from('issued_invoices')
+    .update({ mail_sent_at: sentAt })
+    .eq('billing_doc', billingDoc)
+  if (error) throw new Error(error.message)
+}
+
+export async function clearMailSent(billingDoc) {
+  if (!isSupabaseConfigured()) {
+    const rec = _mockStore.find(r => r.billing_doc === billingDoc)
+    if (rec) rec.mail_sent_at = null
+    return
+  }
+  const { error } = await supabase
+    .from('issued_invoices')
+    .update({ mail_sent_at: null })
+    .eq('billing_doc', billingDoc)
+  if (error) throw new Error(error.message)
+}
+
 // Issued e-invoice records stored in Supabase
 // Table: issued_invoices
 // Schema:
@@ -37,7 +64,7 @@ export async function saveIssuedInvoice(inv) {
     viettel_invoice_no:         inv.viettelInvoiceNo || null,
     viettel_series:             inv.viettelSeries || null,
     viettel_tax_authority_code: inv.viettelTaxAuthorityCode || null,
-    status:                     inv.status || 'pending',
+    status:                     inv.status || 'signing_failed',
     items:                      inv.items || [],
   }
 
@@ -117,6 +144,31 @@ export async function updateInvoiceStatus(billingDoc, status) {
     .neq('status', 'cancelled')
 
   if (error) throw new Error(error.message)
+}
+
+export async function updateCqtStatus(billingDoc, cqtStatus) {
+  if (!isSupabaseConfigured()) {
+    const rec = _mockStore.find(r => r.billing_doc === billingDoc)
+    if (rec) rec.cqt_status = cqtStatus
+    return
+  }
+  const { error } = await supabase
+    .from('issued_invoices')
+    .update({ cqt_status: cqtStatus })
+    .eq('billing_doc', billingDoc)
+  if (error) throw new Error(error.message)
+}
+
+export async function cancelByDeliveryRef(deliveryRef) {
+  if (!isSupabaseConfigured()) {
+    _mockStore.forEach(r => { if (r.delivery_ref === deliveryRef) r.status = 'cancelled' })
+    return
+  }
+  await supabase
+    .from('issued_invoices')
+    .update({ status: 'cancelled' })
+    .eq('delivery_ref', deliveryRef)
+    .neq('status', 'cancelled')
 }
 
 export async function checkAlreadyIssued(billingDoc) {

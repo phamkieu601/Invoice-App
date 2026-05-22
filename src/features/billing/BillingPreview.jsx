@@ -1,16 +1,17 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft, ArrowRight, Printer, ShieldCheck, KeyRound, CheckCircle2,
-  AlertCircle, Mail, Paperclip, Send,
+  AlertCircle, Mail, MailCheck, Paperclip, Send,
 } from 'lucide-react'
-import { useCompanyStore } from '../store/companyStore'
-import { saveIssuedInvoice, checkAlreadyIssued } from '../services/issuedInvoiceService'
-import { toast } from '../store/toastStore'
-import Topbar from '../components/layout/Topbar'
-import Button from '../components/ui/Button'
-import { useT } from '../i18n'
-import { useNotificationStore } from '../store/notificationStore'
+import { useCompanyStore } from '../../store/companyStore'
+import { saveIssuedInvoice, checkAlreadyIssued, cancelByDeliveryRef, updateInvoiceStatus, setMailSent } from '../../services/issuedInvoiceService'
+import { injectMockS1 } from '../../services/sap/invoiceService'
+import { toast } from '../../store/toastStore'
+import Topbar from '../../components/layout/Topbar'
+import Button from '../../components/ui/Button'
+import { useT } from '../../i18n'
+import { useNotificationStore } from '../../store/notificationStore'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const fmtNum = n => Number(n || 0).toLocaleString('vi-VN')
@@ -51,8 +52,8 @@ const tdStyle = { border: '1px solid #999', padding: '4px 6px' }
 
 // ── Mock certs (same as InvoicePreview) ────────────────────────────────────
 const MOCK_CERTS = [
-  { id: 'cert-001', subject: 'ABEO SOFTWARE CO., LTD', issuer: 'VNPT-CA',   serial: '01:AB:CD:EF:23:45:67:89', validFrom: '2023-01-15', validTo: '2026-01-15', status: 'valid' },
-  { id: 'cert-002', subject: 'ABEO SOFTWARE CO., LTD', issuer: 'VIETTEL-CA', serial: '02:FE:DC:BA:98:76:54:32', validFrom: '2022-06-01', validTo: '2025-06-01', status: 'expiring' },
+  { id: 'cert-001', subject: 'ABEO SOFTWARE CO., LTD', issuer: 'VNPT-CA',    serial: '01:AB:CD:EF:23:45:67:89', validFrom: '2024-01-15', validTo: '2027-01-15', status: 'valid' },
+  { id: 'cert-002', subject: 'ABEO SOFTWARE CO., LTD', issuer: 'VIETTEL-CA', serial: '02:FE:DC:BA:98:76:54:32', validFrom: '2022-06-01', validTo: '2025-06-01', status: 'expired' },
 ]
 
 // ── Signing Modal ──────────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
   const [pinWarning, setPinWarning] = useState('')
   const [failCount, setFailCount]   = useState(0)
   const [locked, setLocked]         = useState(false)
+
   const [step, setStep]         = useState('select') // select | confirm | signing
 
   const cert = MOCK_CERTS.find(c => c.id === selectedCert)
@@ -103,6 +105,11 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
   const handleSign = async () => {
     setStep('signing')
     await new Promise(r => setTimeout(r, 1800))
+
+    if (cert?.status === 'expired' || new Date(cert?.validTo) < new Date()) {
+      onConfirm({ cert, error: `Chứng thư số đã hết hạn (${cert.validTo}). Không thể ký số.` })
+      return
+    }
     onConfirm({ cert })
   }
 
@@ -149,8 +156,12 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">{c.subject}</span>
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${c.status === 'valid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                            {c.status === 'valid' ? '● Còn hiệu lực' : '⚠ Sắp hết hạn'}
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                            c.status === 'valid' ? 'bg-green-100 text-green-700'
+                            : c.status === 'expired' ? 'bg-red-100 text-red-700'
+                            : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {c.status === 'valid' ? '● Còn hiệu lực' : c.status === 'expired' ? '✕ Đã hết hạn' : '⚠ Sắp hết hạn'}
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5">CA: <span className="font-medium">{c.issuer}</span> · {c.serial.slice(0, 14)}...</div>
@@ -213,10 +224,12 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
               )}
 
               {step === 'confirm' && (
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg px-3 py-2 text-xs text-yellow-800 dark:text-yellow-300 flex gap-2">
-                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                  Sau khi ký số, hóa đơn sẽ được gửi CQT và lưu vào hệ thống. Không thể hoàn tác.
-                </div>
+                <>
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg px-3 py-2 text-xs text-yellow-800 dark:text-yellow-300 flex gap-2">
+                    <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                    Sau khi ký số, hóa đơn sẽ được gửi CQT và lưu vào hệ thống. Không thể hoàn tác.
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -242,7 +255,7 @@ function SigningModal({ inv, total, seller, onClose, onConfirm }) {
 }
 
 // ── Mail Modal ─────────────────────────────────────────────────────────────
-function MailModal({ inv, total, taxAuthorityCode, seller, onClose }) {
+function MailModal({ inv, total, taxAuthorityCode, seller, onClose, onSent }) {
   const [to, setTo]   = useState(inv.customer?.email || '')
   const [err, setErr] = useState('')
 
@@ -265,6 +278,7 @@ function MailModal({ inv, total, taxAuthorityCode, seller, onClose }) {
   const handleSend = () => {
     if (!to || !/\S+@\S+\.\S+/.test(to)) { setErr('Vui lòng nhập email hợp lệ'); return }
     window.open(`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
+    onSent?.()
     onClose()
   }
 
@@ -333,7 +347,10 @@ export default function BillingPreview() {
   const t              = useT()
 
   // Invoice data passed from InvoiceList via location.state
-  const inv = location.state?.inv
+  const inv               = location.state?.inv
+  const invoiceMode       = location.state?.invoiceMode       // 'replacement' | 'adjustment' | undefined
+  const originalBillingDoc = location.state?.originalBillingDoc
+  const s1BillingDoc      = location.state?.s1BillingDoc
 
   const SELLER = {
     name:       company.companyName,
@@ -348,13 +365,45 @@ export default function BillingPreview() {
     legalRepTitle: company.legalRepTitle,
   }
 
+  const invoiceCfg = (() => {
+    try { return { seriesPrefix: 'C', taxRate: '10', signatureLabel: 'Người ký hóa đơn', invoiceNote: 'Đề nghị thanh toán theo thông tin ngân hàng trên hóa đơn.', requireApproval: false, ...JSON.parse(localStorage.getItem('invoiceConfig') || '{}') } }
+    catch { return { seriesPrefix: 'C', taxRate: '10', signatureLabel: 'Người ký hóa đơn', invoiceNote: 'Đề nghị thanh toán theo thông tin ngân hàng trên hóa đơn.', requireApproval: false } }
+  })()
+
+  const isS1         = inv?.billingDocType === 'S1'
+  const isReplacement = invoiceMode === 'replacement'
+  const isAdjustment  = invoiceMode === 'adjustment'
+  // New virtual billingDoc so it doesn't conflict with the original issued record
+  const virtualBillingDoc = isReplacement
+    ? `${originalBillingDoc}-REP`
+    : isAdjustment
+      ? `${originalBillingDoc}-ADJ`
+      : null
+
   const alreadyIssued = location.state?.issued === true
   const bulkQueue     = location.state?.bulkQueue || []
   const addNotification = useNotificationStore(s => s.add)
 
+  useEffect(() => {
+    if (!isS1) return
+    if (inv?.cancelledBillingDoc) updateInvoiceStatus(inv.cancelledBillingDoc, 'cancelled').catch(() => {})
+    updateInvoiceStatus(inv.sapBillingDoc, 'cancelled').catch(() => {})
+  }, [])
+
   const [showSignModal, setShowSignModal] = useState(false)
   const [showMailModal, setShowMailModal] = useState(false)
   const [issued, setIssued]               = useState(alreadyIssued)
+  const [mailSentAt, setMailSentAt]       = useState(null)
+
+  useEffect(() => {
+    if (!inv?.sapBillingDoc) return
+    import('../../services/issuedInvoiceService').then(({ getIssuedInvoices }) =>
+      getIssuedInvoices({ search: inv.sapBillingDoc }).then(rows => {
+        const rec = rows.find(r => r.billing_doc === inv.sapBillingDoc)
+        if (rec?.mail_sent_at) setMailSentAt(rec.mail_sent_at)
+      }).catch(() => {})
+    )
+  }, [inv?.sapBillingDoc])
   const [taxAuthorityCode]                = useState(
     location.state?.taxAuthorityCode ||
     `${new Date().getFullYear()}${String(Math.floor(Math.random() * 999999)).padStart(6, '0')}VN`
@@ -376,14 +425,15 @@ export default function BillingPreview() {
   const vatTotal = items.reduce((s, it) => s + (it.taxAmount ?? it.qty * it.unitPrice * (it.vatRate / 100)), 0)
   const total    = inv.totalGrossAmount ?? (subtotal + vatTotal)
 
-  const handleSignConfirmed = async ({ cert }) => {
+  const handleSignConfirmed = async ({ cert, error: certError }) => {
     setShowSignModal(false)
     const yr2 = String(new Date().getFullYear()).slice(-2)
-    const mockSeries = `C${yr2}T`
+    const mockSeries = `${invoiceCfg.seriesPrefix}${yr2}T`
     const mockInvoiceNo = String(Date.now()).slice(-6)
+    const saveBillingDoc = virtualBillingDoc || inv.sapBillingDoc
     const invoicePayload = {
-      billingDoc:              inv.sapBillingDoc,
-      billingDocType:          inv.billingDocType,
+      billingDoc:              saveBillingDoc,
+      billingDocType:          isReplacement ? 'replacement' : isAdjustment ? 'adjustment' : inv.billingDocType,
       issueDate:               inv.issueDate,
       dueDate:                 inv.dueDate,
       customerName:            inv.customer?.name,
@@ -402,10 +452,17 @@ export default function BillingPreview() {
       items,
     }
     try {
-      await checkAlreadyIssued(inv.sapBillingDoc)
+      if (certError) throw new Error(certError)
+      if (!invoiceMode) await checkAlreadyIssued(inv.sapBillingDoc)
       await saveIssuedInvoice({ ...invoicePayload, status: 'issued' })
+      // Thay thế: HD gốc vô hiệu → cancelled
+      // Điều chỉnh: HD gốc vẫn hợp lệ → giữ nguyên
+      if (isReplacement && originalBillingDoc) {
+        await updateInvoiceStatus(originalBillingDoc, 'cancelled').catch(() => {})
+      }
       setIssued(true)
-      toast.success(`Hóa đơn ${inv.sapBillingDoc} đã ký số và gửi CQT thành công!`)
+      const modeLabel = isReplacement ? 'thay thế' : isAdjustment ? 'điều chỉnh' : ''
+      toast.success(`Hóa đơn ${modeLabel ? modeLabel + ' ' : ''}${saveBillingDoc} đã ký số và gửi CQT thành công!`)
       addNotification({
         type:    'invoice',
         variant: 'success',
@@ -413,15 +470,19 @@ export default function BillingPreview() {
         body:    `${inv.customer?.name || '—'} · ${fmtNum(total)} ${inv.currency || 'VND'}`,
       })
     } catch (e) {
-      try { await saveIssuedInvoice({ ...invoicePayload, status: 'pending' }) } catch (_) {}
-      toast.error('Lưu hóa đơn thất bại — ' + e.message)
+      try {
+        await saveIssuedInvoice({ ...invoicePayload, status: 'signing_failed' })
+        toast.error('Ký số thất bại — ' + e.message)
+      } catch (saveErr) {
+        toast.error('Ký số thất bại và không thể lưu trạng thái — ' + saveErr.message)
+      }
     }
   }
 
   return (
     <div className="flex flex-col h-full">
       <Topbar
-        title={`Billing Document · ${inv.sapBillingDoc}`}
+        title={isReplacement ? `Hóa đơn thay thế · ${originalBillingDoc}` : isAdjustment ? `Hóa đơn điều chỉnh · ${originalBillingDoc}` : `Billing Document · ${inv.sapBillingDoc}`}
         actions={
           <div className="flex items-center gap-2 no-print">
             <Button icon={ArrowLeft} size="sm" variant="ghost" onClick={() => navigate(issued ? '/issued-invoices' : '/invoices')}>
@@ -430,15 +491,38 @@ export default function BillingPreview() {
             <Button icon={Printer} size="sm" variant="secondary" onClick={() => window.print()}>
               {t('preview.print')}
             </Button>
-            {!issued && (
+            {isS1 && (
+              <span className="text-xs text-red-600 font-medium px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg">Chứng từ hủy (S1) — Không phát hành HĐĐT</span>
+            )}
+            {!isS1 && !issued && !invoiceCfg.requireApproval && (
               <Button icon={ShieldCheck} size="sm" variant="success" onClick={() => setShowSignModal(true)}>
                 {t('preview.issue')}
               </Button>
             )}
+            {!isS1 && !issued && invoiceCfg.requireApproval && (
+              <span className="text-xs text-amber-600 font-medium px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">Chờ duyệt trước khi ký</span>
+            )}
+            {issued && !invoiceMode && (
+              <button
+                onClick={() => { injectMockS1(inv.sapBillingDoc, inv); navigate('/invoices') }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 transition-colors cursor-pointer"
+                title="[Test] Tạo S1 giả để test luồng đảo phiếu"
+              >
+                [Test] Inject S1
+              </button>
+            )}
             {issued && (
-              <Button icon={Mail} size="sm" variant="secondary" onClick={() => setShowMailModal(true)}>
-                Send Email
-              </Button>
+              <button
+                onClick={() => setShowMailModal(true)}
+                title={mailSentAt ? `Đã gửi: ${new Date(mailSentAt).toLocaleString('vi-VN')}` : 'Chưa gửi email'}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                  mailSentAt
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {mailSentAt ? <><MailCheck size={13} /> Đã gửi mail</> : <><Mail size={13} /> Gửi Email</>}
+              </button>
             )}
             {issued && bulkQueue.length > 0 && (
               <Button icon={ArrowRight} size="sm" variant="primary"
@@ -453,7 +537,7 @@ export default function BillingPreview() {
 
       <div className="flex-1 overflow-auto p-6 bg-slate-100 dark:bg-slate-900">
         <div id="invoice-doc" className="max-w-4xl mx-auto bg-white">
-          <div id="invoice-inner" style={{ border: '4px solid #2d6a2d', padding: '4px' }}>
+          <div id="invoice-inner" style={{ border: '4px solid #2d6a2d', padding: '4px', fontSize: '12px', fontFamily: 'Arial, sans-serif' }}>
           <div style={{ border: '1.5px solid #2d6a2d', padding: '20px 24px', position: 'relative', overflow: 'hidden' }}>
 
             {/* Watermark — only before issue */}
@@ -473,9 +557,18 @@ export default function BillingPreview() {
               </div>
               <div className="text-center flex-1 px-4">
                 <div className="flex items-center justify-center gap-2">
-                  <span className="font-bold text-xl tracking-wide text-black" style={{ whiteSpace: 'nowrap' }}>HÓA ĐƠN GIÁ TRỊ GIA TĂNG</span>
+                  <span className="font-bold text-xl tracking-wide text-black" style={{ whiteSpace: 'nowrap' }}>
+                    {isReplacement ? 'HÓA ĐƠN THAY THẾ' : isAdjustment ? 'HÓA ĐƠN ĐIỀU CHỈNH' : 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG'}
+                  </span>
                 </div>
                 <div className="text-xs text-slate-600 mt-0.5">{formatDate(inv.issueDate)}</div>
+                {(isReplacement || isAdjustment) && (
+                  <div className="text-xs mt-1 text-red-700 font-medium">
+                    {isReplacement ? 'Thay thế hóa đơn' : 'Điều chỉnh hóa đơn'}{' '}
+                    <span className="font-mono font-bold">{originalBillingDoc}</span>
+                    {s1BillingDoc && <span className="text-slate-500 font-normal"> (S1: {s1BillingDoc})</span>}
+                  </div>
+                )}
                 <div className="text-xs mt-1">
                   <span className="font-semibold">Mã cơ quan thuế: </span>
                   <span style={{ color: issued ? '#000' : '#94a3b8', fontStyle: issued ? 'normal' : 'italic' }}>
@@ -487,7 +580,7 @@ export default function BillingPreview() {
               <div style={{ width: '180px' }} className="text-right text-xs">
                 <table className="ml-auto text-xs">
                   <tbody>
-                    <tr><td className="text-slate-600 pr-2">Ký hiệu:</td><td className="font-bold text-black">C25T</td></tr>
+                    <tr><td className="text-slate-600 pr-2">Ký hiệu:</td><td className="font-bold text-black">{invoiceCfg.seriesPrefix}{new Date().getFullYear().toString().slice(-2)}T</td></tr>
                     <tr><td className="text-slate-600 pr-2">Số:</td>
                       <td className="font-bold" style={{ color: issued ? '#e53012' : '#94a3b8' }}>{issued ? '001' : '---'}</td>
                     </tr>
@@ -589,6 +682,11 @@ export default function BillingPreview() {
               <span className="italic">{numberToWords(total)}</span>
             </div>
 
+            {/* Invoice note */}
+            {invoiceCfg.invoiceNote && (
+              <div className="text-xs mt-1.5 italic text-slate-500">{invoiceCfg.invoiceNote}</div>
+            )}
+
             {/* Signatures */}
             <div className="flex gap-2 mt-5">
               <div className="flex-1 grid grid-cols-3 gap-3 text-xs text-center">
@@ -614,7 +712,7 @@ export default function BillingPreview() {
                 </div>
                 {/* Seller */}
                 <div>
-                  <div className="font-bold text-[11px]">Người bán hàng</div>
+                  <div className="font-bold text-[11px]">{invoiceCfg.signatureLabel}</div>
                   <div className="text-slate-400 italic text-[10px]">(Ký điện tử, chữ ký số)</div>
                   <div className="mt-1 h-16 rounded border flex flex-col items-center justify-center gap-0.5 px-1"
                     style={{ borderStyle: issued ? 'solid' : 'dashed', borderColor: issued ? '#22c55e' : '#cbd5e1', background: issued ? '#f0fdf4' : 'transparent' }}>
@@ -669,6 +767,11 @@ export default function BillingPreview() {
           taxAuthorityCode={taxAuthorityCode}
           seller={SELLER}
           onClose={() => setShowMailModal(false)}
+          onSent={() => {
+            const now = new Date().toISOString()
+            setMailSentAt(now)
+            setMailSent(inv.sapBillingDoc, now).catch(() => {})
+          }}
         />
       )}
       {showSignModal && (

@@ -1,16 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Search, Eye, RefreshCw, Download, FileText, WifiOff, Settings, Database, X, ChevronRight, Send, CheckCircle2, Zap } from 'lucide-react'
-import BulkSignModal from '../components/invoice/BulkSignModal'
-import { useInvoiceStore } from '../store/invoiceStore'
-import { batchCheckInvoiceStatus, isViettelConfigured } from '../services/viettelService'
-import { getIssuedInvoices } from '../services/issuedInvoiceService'
-import Badge from '../components/ui/Badge'
-import Button from '../components/ui/Button'
-import EmptyState from '../components/ui/EmptyState'
-import Pagination from '../components/ui/Pagination'
-import Topbar from '../components/layout/Topbar'
-import { useT } from '../i18n'
+import BulkSignModal from '../../components/invoice/BulkSignModal'
+import ReversalActionModal from '../../components/invoice/ReversalActionModal'
+import { useInvoiceStore } from '../../store/invoiceStore'
+import { batchCheckInvoiceStatus, isViettelConfigured } from '../../services/viettelService'
+import { getIssuedInvoices, cancelByDeliveryRef, updateInvoiceStatus } from '../../services/issuedInvoiceService'
+import Badge from '../../components/ui/Badge'
+import Button from '../../components/ui/Button'
+import EmptyState from '../../components/ui/EmptyState'
+import Pagination from '../../components/ui/Pagination'
+import Topbar from '../../components/layout/Topbar'
+import { useT } from '../../i18n'
 
 const fmt = (n, currency = 'VND') => {
   const num = Number(n || 0)
@@ -42,6 +43,7 @@ export default function InvoiceList() {
   const STATUS_TABS = [
     { value: '',           label: t('invoiceList.tab.all') },
     { value: 'issued',     label: t('invoiceList.tab.issued') },
+    { value: 'pending',    label: t('invoiceList.tab.signingFailed') },
     { value: 'notIssued',  label: t('invoiceList.tab.notIssued') },
     { value: 'cancelled',  label: t('invoiceList.tab.cancelled') },
   ]
@@ -51,7 +53,7 @@ export default function InvoiceList() {
   const fetchInvoices = useInvoiceStore(s => s.fetchInvoices)
   const location = useLocation()
   const [search, setSearch] = useState(location.state?.deliveryFilter || '')
-  const [activeTab, setActiveTab] = useState('')
+  const [activeTab, setActiveTab] = useState(location.state?.tab || '')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [selectedInv, setSelectedInv] = useState(null)
@@ -60,6 +62,7 @@ export default function InvoiceList() {
   const [issuedMap, setIssuedMap] = useState(new Map())     // billingDoc → issued_invoices record
   const [checkedIds, setCheckedIds] = useState(new Set())   // sapBillingDoc strings
   const [bulkSignOpen, setBulkSignOpen] = useState(false)
+  const [reversalTarget, setReversalTarget] = useState(null) // { f2Inv, s1Inv, issuedRecord }
   const selectAllRef = useRef(null)
   const navigate = useNavigate()
 
@@ -82,7 +85,7 @@ export default function InvoiceList() {
     getIssuedInvoices({})
       .then(list => {
         const m = new Map()
-        list.forEach(r => { if (r.status !== 'cancelled') m.set(r.billing_doc, r) })
+        list.forEach(r => { m.set(r.billing_doc, r) })
         setIssuedMap(m)
       })
       .catch(() => {})
@@ -90,20 +93,69 @@ export default function InvoiceList() {
   useEffect(() => { loadIssuedMap() }, [])
   useEffect(() => { loadIssuedMap() }, [location.key])
 
-  const isFullyIssued = (inv) => issuedMap.get(inv.sapBillingDoc)?.status === 'issued'
+  useEffect(() => {
+    if (!invoices.length || !issuedMap.size) return
+    const s1List = invoices.filter(i => i.billingDocType === 'S1' && i.cancelledBillingDoc)
+    if (!s1List.length) return
+
+    // For issued F2s: show modal so user can choose action per Thông tư 78/2021
+    // For non-issued F2s: auto-cancel silently
+    const toCancel = []
+    for (const s1 of s1List) {
+      const f2Record = issuedMap.get(s1.cancelledBillingDoc)
+      if (f2Record) {
+        if (f2Record.status === 'issued' && !reversalTarget) {
+          const f2Inv = invoices.find(i => i.sapBillingDoc === s1.cancelledBillingDoc)
+          if (f2Inv) {
+            setReversalTarget({ f2Inv, s1Inv: s1, issuedRecord: f2Record })
+            continue
+          }
+        }
+        if (f2Record.status !== 'issued' && f2Record.status !== 'cancelled') {
+          toCancel.push(updateInvoiceStatus(s1.cancelledBillingDoc, 'cancelled').catch(() => {}))
+        }
+      }
+      if (issuedMap.has(s1.sapBillingDoc)) {
+        const s1Record = issuedMap.get(s1.sapBillingDoc)
+        if (s1Record.status !== 'cancelled') {
+          toCancel.push(updateInvoiceStatus(s1.sapBillingDoc, 'cancelled').catch(() => {}))
+        }
+      }
+    }
+    if (toCancel.length) Promise.all(toCancel).then(() => loadIssuedMap())
+  }, [invoices, issuedMap.size])
+
+  const isFullyIssued  = (inv) => issuedMap.get(inv.sapBillingDoc)?.status === 'issued'
+  const isPending      = (inv) => issuedMap.get(inv.sapBillingDoc)?.status === 'signing_failed'
+
+  // S1 trỏ trực tiếp vào F2 qua cancelledBillingDoc
+  const cancelledByS1 = new Set(
+    invoices
+      .filter(i => i.billingDocType === 'S1' && i.cancelledBillingDoc)
+      .map(i => i.cancelledBillingDoc)
+  )
+  const isBlockedByS1 = (inv) => cancelledByS1.has(inv.sapBillingDoc)
+
+  const pendingCount = invoices.filter(i => isPending(i)).length
+
+  const isCancelled = (inv) =>
+    inv.status === 'cancelled' ||
+    isBlockedByS1(inv) ||
+    issuedMap.get(inv.sapBillingDoc)?.status === 'cancelled'
 
   const counts = {
     '': invoices.length,
-    draft: invoices.filter(i => i.status === 'draft').length,
-    issued: invoices.filter(i => isFullyIssued(i)).length,
-    notIssued: invoices.filter(i => i.status !== 'cancelled' && !isFullyIssued(i)).length,
-    cancelled: invoices.filter(i => i.status === 'cancelled').length,
+    issued:    invoices.filter(i => !isCancelled(i) && isFullyIssued(i)).length,
+    pending:   invoices.filter(i => !isCancelled(i) && isPending(i)).length,
+    notIssued: invoices.filter(i => !isCancelled(i) && !isFullyIssued(i) && !isPending(i)).length,
+    cancelled: invoices.filter(i => isCancelled(i)).length,
   }
 
   const filteredInvoices = invoices.filter(inv => {
-    if (activeTab === 'issued') return isFullyIssued(inv)
-    if (activeTab === 'notIssued') return inv.status !== 'cancelled' && !isFullyIssued(inv)
-    if (activeTab === 'cancelled') return inv.status === 'cancelled'
+    if (activeTab === 'issued')    return !isCancelled(inv) && isFullyIssued(inv)
+    if (activeTab === 'pending')   return !isCancelled(inv) && isPending(inv)
+    if (activeTab === 'notIssued') return !isCancelled(inv) && !isFullyIssued(inv) && !isPending(inv)
+    if (activeTab === 'cancelled') return isCancelled(inv)
     return true
   })
 
@@ -225,25 +277,24 @@ export default function InvoiceList() {
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
             <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.issued')}</div>
-            <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{issuedMap.size}</div>
+            <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{counts.issued}</div>
             <div className="text-[10px] text-slate-400 mt-0.5">/ {invoices.length} docs</div>
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
             <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.pending')}</div>
             <div className="text-lg font-bold text-amber-600 dark:text-amber-400">
-              {invoices.filter(i => i.status !== 'cancelled' && !isFullyIssued(i)).length}
+              {counts.notIssued}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">{t('invoiceList.summary.needsAction')}</div>
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
-            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.revenue')}</div>
-            <div className="text-sm font-bold text-blue-600 dark:text-blue-400">{fmt(totalRevenue)}</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">{t('invoiceList.summary.totalBillingDocs')}</div>
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">Signing Failed</div>
+            <div className="text-lg font-bold text-red-600 dark:text-red-400">{pendingCount}</div>
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
             <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">{t('invoiceList.summary.cancelled')}</div>
             <div className="text-lg font-bold text-red-500 dark:text-red-400">
-              {invoices.filter(i => i.status === 'cancelled').length}
+              {counts.cancelled}
             </div>
             <div className="text-[10px] text-slate-400 mt-0.5">billing docs</div>
           </div>
@@ -352,7 +403,7 @@ export default function InvoiceList() {
                 {pagedInvoices.map(inv => {
                   const total = getInvoiceTotal(inv)
                   const isSelected = selectedInv?.id === inv.id
-                  const isIssuable = inv.status !== 'cancelled' && !isFullyIssued(inv)
+                  const isIssuable = inv.status !== 'cancelled' && !isFullyIssued(inv) && !isBlockedByS1(inv)
                   const isChecked  = checkedIds.has(inv.sapBillingDoc)
                   return (
                     <tr key={inv.id}
@@ -401,13 +452,15 @@ export default function InvoiceList() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {inv.status === 'cancelled'
-                          ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('invoiceList.status.cancelled')}</span>
-                          : issuedMap.get(inv.sapBillingDoc)?.status === 'issued'
-                            ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={9} /> {t('invoiceList.status.issued')}</span>
-                            : issuedMap.get(inv.sapBillingDoc)?.status === 'pending'
-                              ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
-                              : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">{t('invoiceList.status.notIssued')}</span>
+                        {inv.billingDocType === 'S1'
+                          ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">Reversal</span>
+                          : isCancelled(inv)
+                            ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('invoiceList.status.cancelled')}</span>
+                            : issuedMap.get(inv.sapBillingDoc)?.status === 'issued'
+                              ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={9} /> {t('invoiceList.status.issued')}</span>
+                              : issuedMap.get(inv.sapBillingDoc)?.status === 'signing_failed'
+                                ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
+                                : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">{t('invoiceList.status.notIssued')}</span>
                         }
                       </td>
                       <td className="px-4 py-3">
@@ -422,7 +475,7 @@ export default function InvoiceList() {
                           >
                             <Eye size={11} /> {t('invoiceList.details')}
                           </button>
-                          {inv.status !== 'cancelled' && !isFullyIssued(inv) && (
+                          {inv.billingDocType !== 'S1' && !isCancelled(inv) && !isFullyIssued(inv) && !isBlockedByS1(inv) && (
                             <button
                               onClick={e => { e.stopPropagation(); navigate(`/billing-preview/${inv.sapBillingDoc}`, { state: { inv } }) }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors whitespace-nowrap shadow-sm cursor-pointer"
@@ -484,6 +537,17 @@ export default function InvoiceList() {
 
       </div>
 
+      {/* ── Reversal Action Modal ────────────────────────────────── */}
+      {reversalTarget && (
+        <ReversalActionModal
+          f2Inv={reversalTarget.f2Inv}
+          s1Inv={reversalTarget.s1Inv}
+          issuedRecord={reversalTarget.issuedRecord}
+          onClose={() => setReversalTarget(null)}
+          onDone={() => { setReversalTarget(null); loadIssuedMap() }}
+        />
+      )}
+
       {/* ── Bulk Sign Modal ──────────────────────────────────────── */}
       {bulkSignOpen && (
         <BulkSignModal
@@ -509,19 +573,29 @@ export default function InvoiceList() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">{selectedInv.sapBillingDoc}</span>
-                  {selectedInv.status === 'cancelled'
-                    ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('invoiceList.status.cancelled')}</span>
-                    : issuedMap.get(selectedInv.sapBillingDoc)?.status === 'issued'
-                      ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={9} /> {t('invoiceList.status.issued')}</span>
-                      : issuedMap.get(selectedInv.sapBillingDoc)?.status === 'pending'
-                        ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
-                        : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">{t('invoiceList.status.notIssued')}</span>
+                  {selectedInv.billingDocType === 'S1'
+                    ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">Reversal</span>
+                    : isCancelled(selectedInv)
+                      ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{t('invoiceList.status.cancelled')}</span>
+                      : issuedMap.get(selectedInv.sapBillingDoc)?.status === 'issued'
+                        ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={9} /> {t('invoiceList.status.issued')}</span>
+                        : issuedMap.get(selectedInv.sapBillingDoc)?.status === 'signing_failed'
+                          ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">{t('invoiceList.status.pending')}</span>
+                          : <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">{t('invoiceList.status.notIssued')}</span>
                   }
                   {selectedInv.billingDocType && (
                     <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">{selectedInv.billingDocType}</span>
                   )}
                 </div>
-                <div className="text-xs text-slate-400 mt-0.5">Billing Document</div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-xs text-slate-400">Billing Document</span>
+                  {selectedInv.billingDocType === 'S1' && selectedInv.cancelledBillingDoc && (
+                    <span className="text-[10px] text-slate-500">→ Reversal of <span className="font-mono font-semibold text-red-600">{selectedInv.cancelledBillingDoc}</span></span>
+                  )}
+                  {selectedInv.billingDocType === 'F2' && cancelledByS1.has(selectedInv.sapBillingDoc) && (
+                    <span className="text-[10px] text-slate-500">← Reversed by <span className="font-mono font-semibold text-red-600">{invoices.find(i => i.cancelledBillingDoc === selectedInv.sapBillingDoc)?.sapBillingDoc}</span></span>
+                  )}
+                </div>
               </div>
               <button onClick={() => setSelectedInv(null)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 transition-colors">
                 <X size={16} />
@@ -619,7 +693,7 @@ export default function InvoiceList() {
 
             {/* Footer */}
             <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
-              {selectedInv.status === 'cancelled' ? (
+              {isCancelled(selectedInv) ? (
                 <div className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium text-slate-400 bg-slate-100 dark:bg-slate-700 rounded-xl">
                   {t('invoiceList.panel.cancelled')}
                 </div>

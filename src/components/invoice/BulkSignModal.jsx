@@ -103,7 +103,7 @@ export default function BulkSignModal({ invoices, onClose, onComplete }) {
         })
         acc.push({ inv, status: 'success', total })
       } catch (e) {
-        try { await saveIssuedInvoice({ ...payload, status: 'pending' }) } catch (_) {}
+        try { await saveIssuedInvoice({ ...payload, status: 'signing_failed' }) } catch (_) {}
         acc.push({ inv, status: 'error', error: e.message })
       }
       setResults([...acc])

@@ -12,7 +12,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { useCompanyStore } from '../store/companyStore'
 import { LANGUAGES, useT } from '../i18n'
 import { toast } from '../store/toastStore'
-import { testSAPConnection } from '../services/sapClient'
+import { testSAPConnection } from '../services/sap/sapClient'
 import { testViettelConnection, clearTokenCache, isViettelConfigured } from '../services/viettelService'
 import { useSOStore } from '../store/soStore'
 

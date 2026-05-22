@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getSalesOrders, getSalesOrderByNumber, markSOInvoiced } from '../services/soService'
+import { getSalesOrders, getSalesOrderByNumber, markSOInvoiced } from '../services/sap/soService'
 
 export const useSOStore = create((set, get) => ({
   salesOrders: [],

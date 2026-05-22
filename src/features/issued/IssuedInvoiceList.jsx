@@ -2,16 +2,16 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Search, RefreshCw, FileText, Loader2, WifiOff, Database,
-  CheckCircle2, Download, Eye,
+  CheckCircle2, Eye, Mail, MailCheck,
 } from 'lucide-react'
-import { getIssuedInvoices } from '../services/issuedInvoiceService'
-import { isSupabaseConfigured } from '../lib/supabase'
-import { useInvoiceStore } from '../store/invoiceStore'
-import Button from '../components/ui/Button'
-import EmptyState from '../components/ui/EmptyState'
-import Pagination from '../components/ui/Pagination'
-import Topbar from '../components/layout/Topbar'
-import { useT } from '../i18n'
+import { getIssuedInvoices, setMailSent, clearMailSent } from '../../services/issuedInvoiceService'
+import { isSupabaseConfigured } from '../../lib/supabase'
+import { useInvoiceStore } from '../../store/invoiceStore'
+import Button from '../../components/ui/Button'
+import EmptyState from '../../components/ui/EmptyState'
+import Pagination from '../../components/ui/Pagination'
+import Topbar from '../../components/layout/Topbar'
+import { useT } from '../../i18n'
 
 const fmt = (n, currency = 'VND') => {
   const num = Number(n || 0)
@@ -126,6 +126,7 @@ export default function IssuedInvoiceList() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.signedAt')}</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.total')}</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{t('issuedList.col.status')}</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Mail</th>
                   <th className="px-4 py-3 w-20" />
                 </tr>
               </thead>
@@ -181,7 +182,13 @@ export default function IssuedInvoiceList() {
                     className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">
                       {inv.billing_doc}
-                      {inv.billing_doc_type && (
+                      {inv.billing_doc_type === 'replacement' && (
+                        <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">Thay thế</span>
+                      )}
+                      {inv.billing_doc_type === 'adjustment' && (
+                        <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">Điều chỉnh</span>
+                      )}
+                      {inv.billing_doc_type && inv.billing_doc_type !== 'replacement' && inv.billing_doc_type !== 'adjustment' && (
                         <div className="text-[10px] text-slate-400 font-normal mt-0.5">{inv.billing_doc_type}</div>
                       )}
                     </td>
@@ -227,6 +234,32 @@ export default function IssuedInvoiceList() {
                             <CheckCircle2 size={9} /> {t('issuedList.status.issued')}
                           </span>
                       }
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {(() => {
+                        const sentAt = inv.mail_sent_at
+                        return (
+                          <button
+                            title={sentAt ? `Đã gửi: ${new Date(sentAt).toLocaleString('vi-VN')}` : 'Chưa gửi mail — click để đánh dấu'}
+                            onClick={async () => {
+                              try {
+                                if (sentAt) await clearMailSent(inv.billing_doc)
+                                else await setMailSent(inv.billing_doc)
+                                load()
+                              } catch (e) {
+                                alert('Lỗi: ' + e.message)
+                              }
+                            }}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer ${
+                              sentAt
+                                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200'
+                                : 'bg-slate-100 dark:bg-slate-700 text-slate-400 hover:bg-blue-50 hover:text-blue-600'
+                            }`}
+                          >
+                            {sentAt ? <><MailCheck size={11} /> Đã gửi</> : <><Mail size={11} /> Chưa gửi</>}
+                          </button>
+                        )
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button

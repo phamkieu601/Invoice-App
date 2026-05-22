@@ -4,12 +4,12 @@ import {
   Search, RefreshCw, Truck, Loader2, WifiOff, Database, ChevronDown, ChevronUp,
   ShoppingCart, FileText,
 } from 'lucide-react'
-import { getDeliveries, getDeliveryItems } from '../services/deliveryService'
-import Button from '../components/ui/Button'
-import EmptyState from '../components/ui/EmptyState'
-import Pagination from '../components/ui/Pagination'
-import Topbar from '../components/layout/Topbar'
-import { useT } from '../i18n'
+import { getDeliveries, getDeliveryItems } from '../../services/sap/deliveryService'
+import Button from '../../components/ui/Button'
+import EmptyState from '../../components/ui/EmptyState'
+import Pagination from '../../components/ui/Pagination'
+import Topbar from '../../components/layout/Topbar'
+import { useT } from '../../i18n'
 
 function getSAPInfo() {
   try {

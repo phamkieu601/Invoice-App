@@ -10,7 +10,7 @@ import {
   Clock3,
   RefreshCw,
 } from 'lucide-react'
-import { getInvoiceLog } from '../services/invoiceService'
+import { getInvoiceLog } from '../services/sap/invoiceService'
 import Topbar from '../components/layout/Topbar'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'

@@ -69,6 +69,13 @@ export const getInvoices = async ({ search = '', status = '', deliveryFilter = '
     })
   }
 
+  // Merge localDrafts (includes injected mock S1s) into SAP results
+  if (localDrafts.length) {
+    const sapIds = new Set(results.map(r => r.sapBillingDoc))
+    const extras = localDrafts.filter(d => !sapIds.has(d.sapBillingDoc))
+    results = [...extras, ...results]
+  }
+
   if (deliveryFilter) results = results.filter(inv => inv.deliveryRef === deliveryFilter)
   if (search) results = results.filter(inv =>
     inv.customer.name.toLowerCase().includes(search.toLowerCase()) || inv.id.includes(search) || (inv.deliveryRef || '').includes(search)
@@ -186,6 +193,30 @@ export const cancelInvoice = async (id) => {
   return store.find(inv => inv.id === id)
 }
 
+// Inject a mock S1 reversal for a given F2 billing doc (UI testing only)
+export function injectMockS1(f2BillingDoc, f2Inv = {}) {
+  const s1Id = `S1-${f2BillingDoc}`
+  if (localDrafts.find(d => d.sapBillingDoc === s1Id)) return // already injected
+  localDrafts = [
+    ...localDrafts,
+    {
+      id:                  s1Id,
+      sapBillingDoc:       s1Id,
+      billingDocType:      'S1',
+      cancelledBillingDoc: f2BillingDoc,
+      status:              'issued',
+      issueDate:           new Date().toISOString().slice(0, 10),
+      dueDate:             null,
+      currency:            f2Inv.currency || 'VND',
+      paymentMethod:       f2Inv.paymentMethod || '',
+      deliveryRef:         f2Inv.deliveryRef || '',
+      customer:            f2Inv.customer || { code: '', name: '', taxCode: '', address: '' },
+      items:               f2Inv.items || [],
+      totalGrossAmount:    f2Inv.totalGrossAmount || 0,
+    },
+  ]
+}
+
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
 const mapSAPToLocal = (doc) => {
@@ -238,6 +269,7 @@ const mapSAPToLocal = (doc) => {
     payer: doc.PayerPartyName || rgPartner.AddressPersonFullName || rgPartner.PartnerName || '',
     payerCode: doc.Payer || rgPartner.Customer || '',
     deliveryRef: doc.ReferenceSDDocument || doc.to_Item?.results?.[0]?.ReferenceSDDocument || '',
+    cancelledBillingDoc: doc.CancelledBillingDocument || '',
     totalNetAmount,
     totalTaxAmount,
     totalGrossAmount,

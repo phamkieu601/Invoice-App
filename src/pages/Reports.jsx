@@ -265,18 +265,18 @@ function InvoiceReport({ invoices, issuedHDDT }) {
     all:      filtered,
     issued:   filtered.filter(r => r.status !== 'cancelled'),
     cancelled:filtered.filter(r => r.status === 'cancelled'),
-    adjusted: filtered.filter(r => (r.billing_doc_type || '').includes('ZCRM') || (r.viettel_invoice_type || '') === 'adjusted'),
-    replaced: filtered.filter(r => (r.viettel_invoice_type || '') === 'replaced'),
+    adjusted: filtered.filter(r => (r.billing_doc || '').endsWith('-ADJ')),
+    replaced: filtered.filter(r => (r.billing_doc || '').endsWith('-REP')),
   }), [filtered])
 
   const tabData = tabs[activeTab] ?? tabs.all
 
-  // KPI totals over non-cancelled
-  const active = tabs.issued
-  const totalCount   = filtered.length
-  const totalHang    = active.reduce((s, r) => s + (r._sap?.totalNetAmount   || r.total_amount || 0), 0)
-  const totalVAT     = active.reduce((s, r) => s + (r._sap?.totalTaxAmount   || 0), 0)
-  const totalPayment = active.reduce((s, r) => s + (r._sap?.totalGrossAmount || r.total_amount || 0), 0)
+  // KPI totals — reflect the currently active tab, excluding cancelled rows
+  const kpiData      = tabData.filter(r => r.status !== 'cancelled')
+  const totalCount   = kpiData.length
+  const totalHang    = kpiData.reduce((s, r) => s + (r._sap?.totalNetAmount   || r.total_amount || 0), 0)
+  const totalVAT     = kpiData.reduce((s, r) => s + (r._sap?.totalTaxAmount   || 0), 0)
+  const totalPayment = kpiData.reduce((s, r) => s + (r._sap?.totalGrossAmount || r.total_amount || 0), 0)
 
   // Pagination
   const totalPages = Math.ceil(tabData.length / PAGE_SIZE)
@@ -308,29 +308,29 @@ function InvoiceReport({ invoices, issuedHDDT }) {
       const sap = r._sap
       const vatRates = sap ? [...new Set((sap.items||[]).map(it=>it.vatRate).filter(v=>v!=null))].map(v=>v+'%').join(', ') : ''
       return {
-        'STT': i + 1,
-        'Ngày HĐ': r.issue_date || r.signed_at?.slice(0,10) || '',
-        'Ký hiệu': r.viettel_series || r.billing_doc_type || '',
-        'Số HĐ': r.viettel_invoice_no || '',
-        'Mã CQT': r.viettel_tax_authority_code || '',
+        '#': i + 1,
+        'Invoice Date': r.issue_date || r.signed_at?.slice(0,10) || '',
+        'Series': r.viettel_series || r.billing_doc_type || '',
+        'Invoice No.': r.viettel_invoice_no || '',
+        'CQT Code': r.viettel_tax_authority_code || '',
         'Billing Doc': r.billing_doc,
-        'Tên khách hàng': r.customer_name || '',
-        'MST khách hàng': r.customer_tax_code || '',
-        'Tiền hàng': sap?.totalNetAmount || r.total_amount || 0,
-        'Thuế VAT': sap?.totalTaxAmount || 0,
-        'Tổng thanh toán': sap?.totalGrossAmount || r.total_amount || 0,
-        'Thuế suất (%)': vatRates,
-        'Trạng thái': r.status === 'cancelled' ? 'Đã hủy' : 'Đã phát hành',
+        'Customer Name': r.customer_name || '',
+        'Customer Tax ID': r.customer_tax_code || '',
+        'Net Amount': r.status === 'cancelled' ? 0 : (sap?.totalNetAmount || r.total_amount || 0),
+        'VAT Amount': r.status === 'cancelled' ? 0 : (sap?.totalTaxAmount || 0),
+        'Total': r.status === 'cancelled' ? 0 : (sap?.totalGrossAmount || r.total_amount || 0),
+        'VAT Rate (%)': vatRates,
+        'Status': r.status === 'cancelled' ? 'Cancelled' : 'Issued',
       }
     })
     const ws = XLSX.utils.json_to_sheet(rows)
     // Column widths
-    ws['!cols'] = [8,14,12,14,36,16,36,18,18,16,20,14,14].map(w=>({wch:w}))
+    ws['!cols'] = [8,14,12,14,36,16,36,18,18,16,18,14,14].map(w=>({wch:w}))
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Hoa don dien tu')
-    const label = activeTab === 'all' ? 'TatCa' : activeTab === 'issued' ? 'DaPhatHanh' : activeTab === 'cancelled' ? 'DaHuy' : activeTab
-    XLSX.writeFile(wb, `BaoCao_HDDT_${label}_${new Date().toISOString().slice(0,10)}.xlsx`)
-    toast.success('Đã xuất file Excel thành công.')
+    XLSX.utils.book_append_sheet(wb, ws, 'E-Invoices')
+    const label = activeTab === 'all' ? 'All' : activeTab === 'issued' ? 'Issued' : activeTab === 'cancelled' ? 'Cancelled' : activeTab
+    XLSX.writeFile(wb, `InvoiceReport_${label}_${new Date().toISOString().slice(0,10)}.xlsx`)
+    toast.success('Excel file exported successfully.')
   }
 
   return (
@@ -389,10 +389,10 @@ function InvoiceReport({ invoices, issuedHDDT }) {
         {/* KPI cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: t('reports.kpi.total'),      value: fmtN(totalCount),   icon: FileText,      color: 'bg-blue-50 dark:bg-blue-900/20',    ic: 'text-blue-500',   vc: 'text-blue-700 dark:text-blue-300' },
-            { label: t('reports.kpi.netAmount'),  value: fmtN(totalHang),    icon: TrendingUp,    color: 'bg-green-50 dark:bg-green-900/20',   ic: 'text-green-500',  vc: 'text-green-700 dark:text-green-300' },
-            { label: t('reports.kpi.taxAmount'),  value: fmtN(totalVAT),     icon: Receipt,       color: 'bg-purple-50 dark:bg-purple-900/20', ic: 'text-purple-500', vc: 'text-purple-700 dark:text-purple-300' },
-            { label: t('reports.kpi.grossAmount'),value: fmtN(totalPayment), icon: FileBarChart2, color: 'bg-orange-50 dark:bg-orange-900/20', ic: 'text-orange-500', vc: 'text-orange-700 dark:text-orange-300' },
+            { label: t('reports.kpi.total'),      value: fmtN(totalCount) + ' inv.', icon: FileText,      color: 'bg-blue-50 dark:bg-blue-900/20',    ic: 'text-blue-500',   vc: 'text-blue-700 dark:text-blue-300' },
+            { label: t('reports.kpi.netAmount'),  value: fmt(totalHang),             icon: TrendingUp,    color: 'bg-green-50 dark:bg-green-900/20',   ic: 'text-green-500',  vc: 'text-green-700 dark:text-green-300' },
+            { label: t('reports.kpi.taxAmount'),  value: fmt(totalVAT),              icon: Receipt,       color: 'bg-purple-50 dark:bg-purple-900/20', ic: 'text-purple-500', vc: 'text-purple-700 dark:text-purple-300' },
+            { label: t('reports.kpi.grossAmount'),value: fmt(totalPayment),          icon: FileBarChart2, color: 'bg-orange-50 dark:bg-orange-900/20', ic: 'text-orange-500', vc: 'text-orange-700 dark:text-orange-300' },
           ].map(c => (
             <div key={c.label} className={`${c.color} rounded-xl p-4 border border-white/50 dark:border-slate-700/50`}>
               <c.icon size={16} className={`${c.ic} mb-2`} />
@@ -443,6 +443,7 @@ function InvoiceReport({ invoices, issuedHDDT }) {
                     { key: 'customer',  label: t('reports.col.customer'),  align: 'left' },
                     { key: 'netAmount', label: t('reports.col.netAmount'), align: 'right' },
                     { key: 'taxAmount', label: t('reports.col.taxAmount'), align: 'right' },
+                    { key: 'total',     label: 'Total',                    align: 'right' },
                     { key: 'taxRate',   label: t('reports.col.taxRate'),   align: 'center' },
                     { key: 'action',    label: t('reports.col.action'),    align: 'left' },
                   ].map(h => (
@@ -471,13 +472,16 @@ function InvoiceReport({ invoices, issuedHDDT }) {
                       </td>
                       <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300 max-w-[200px]">
                         <div className="truncate font-medium">{r.customer_name || '—'}</div>
-                        {r.customer_tax_code && <div className="text-[10px] text-slate-400 mt-0.5">MST: {r.customer_tax_code}</div>}
+                        {r.customer_tax_code && <div className="text-[10px] text-slate-400 mt-0.5">Tax ID: {r.customer_tax_code}</div>}
                       </td>
                       <td className="px-4 py-2.5 text-right font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
                         {r.status === 'cancelled' ? <span className="text-slate-300 line-through">{fmtN(sap?.totalNetAmount||r.total_amount||0)}</span> : fmtN(sap?.totalNetAmount||r.total_amount||0)}
                       </td>
                       <td className="px-4 py-2.5 text-right text-purple-600 dark:text-purple-400 whitespace-nowrap">
                         {r.status === 'cancelled' ? '—' : fmtN(sap?.totalTaxAmount||0)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-bold text-blue-700 dark:text-blue-300 whitespace-nowrap">
+                        {r.status === 'cancelled' ? '—' : fmtN(sap?.totalGrossAmount||r.total_amount||0)}
                       </td>
                       <td className="px-4 py-2.5 text-center text-slate-500 whitespace-nowrap">{vatRates}</td>
                       <td className="px-3 py-2.5">
@@ -498,8 +502,8 @@ function InvoiceReport({ invoices, issuedHDDT }) {
                     </td>
                     <td className="px-4 py-2.5 text-right text-xs font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap">{fmtN(pageHang)}</td>
                     <td className="px-4 py-2.5 text-right text-xs font-bold text-purple-700 dark:text-purple-300 whitespace-nowrap">{fmtN(pageVAT)}</td>
-                    <td className="px-4 py-2.5 text-center text-xs text-slate-400">{fmtN(pagePayment)} ₫</td>
-                    <td />
+                    <td className="px-4 py-2.5 text-right text-xs font-bold text-blue-700 dark:text-blue-300 whitespace-nowrap">{fmtN(pagePayment)}</td>
+                    <td /><td />
                   </tr>
                 </tfoot>
               )}
@@ -557,7 +561,7 @@ function CQTReport({ invoices, issuedHDDT }) {
   const issued = useMemo(() =>
     issuedHDDT.filter(r => {
       const signedAt = r.signed_at || r.issue_date || ''
-      return signedAt.startsWith(`${year}-${month}`)
+      return signedAt.startsWith(`${year}-${month}`) && r.status !== 'cancelled'
     }),
   [issuedHDDT, month, year])
 
@@ -567,18 +571,46 @@ function CQTReport({ invoices, issuedHDDT }) {
     return issued.map(r => ({ ...r, _sap: sapMap.get(r.billing_doc) }))
   }, [issued, invoices])
 
+  // Expand each invoice into one row per VAT rate group (TT78/2021 requirement)
+  const flatRows = useMemo(() => {
+    const rows = []
+    issuedEnriched.forEach((r, invIdx) => {
+      const items = r._sap?.items || r.items || []
+      const groups = {}
+      items.forEach(it => {
+        const rate = it.vatRate ?? 'N/A'
+        if (!groups[rate]) groups[rate] = { net: 0, vat: 0, descs: [] }
+        const net = it.netAmount ?? ((it.qty || 0) * (it.unitPrice || 0))
+        const vat = it.taxAmount ?? (net * (typeof rate === 'number' ? rate / 100 : 0))
+        groups[rate].net  += net
+        groups[rate].vat  += vat
+        if (it.description) groups[rate].descs.push(it.description)
+      })
+      const rates = Object.keys(groups)
+      if (rates.length === 0) {
+        rows.push({ ...r, _invIdx: invIdx, _isFirst: true, _rowCount: 1, _vatRate: null, _net: r._sap?.totalNetAmount || r.total_amount || 0, _vat: r._sap?.totalTaxAmount || 0, _total: r._sap?.totalGrossAmount || r.total_amount || 0, _descs: [] })
+      } else {
+        rates.forEach((rate, i) => {
+          const g = groups[rate]
+          rows.push({ ...r, _invIdx: invIdx, _isFirst: i === 0, _rowCount: rates.length, _vatRate: rate, _net: g.net, _vat: g.vat, _total: g.net + g.vat, _descs: g.descs })
+        })
+      }
+    })
+    return rows
+  }, [issuedEnriched])
+
   const totalSubtotal = issuedEnriched.reduce((s, r) => s + (r._sap?.totalNetAmount   || r.total_amount || 0), 0)
   const totalVAT      = issuedEnriched.reduce((s, r) => s + (r._sap?.totalTaxAmount   || 0), 0)
   const totalAmount   = issuedEnriched.reduce((s, r) => s + (r._sap?.totalGrossAmount || r.total_amount || 0), 0)
 
-  const periodLabel = `Tháng ${month}/${year}`
+  const periodLabel = `Month ${month}/${year}`
 
   const handleSendCQT = async () => {
-    if (issued.length === 0) { toast.error('Không có hóa đơn nào trong kỳ để gửi.'); return }
+    if (issued.length === 0) { toast.error('No invoices found for this period.'); return }
     setSending(true)
     await new Promise(r => setTimeout(r, 2000))
     setSending(false)
-    toast.success(`Đã gửi bảng kê ${issued.length} hóa đơn tháng ${month}/${year} đến CQT thành công.`)
+    toast.success(`Successfully submitted ${issued.length} invoices for ${periodLabel} to Tax Authority.`)
   }
 
   const handleExportXML = () => {
@@ -598,33 +630,33 @@ function CQTReport({ invoices, issuedHDDT }) {
     }).join('\n')
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<BangKeHoaDon>
-  <KyBaoCao>
-    <Thang>${month}</Thang>
-    <Nam>${year}</Nam>
-  </KyBaoCao>
-  <NguoiBan>
-    <Ten>${company.companyName}</Ten>
-    <MaSoThue>${company.taxCode}</MaSoThue>
-  </NguoiBan>
-  <DanhSachHoaDon>
+<InvoiceSummary>
+  <ReportingPeriod>
+    <Month>${month}</Month>
+    <Year>${year}</Year>
+  </ReportingPeriod>
+  <Seller>
+    <Name>${company.companyName}</Name>
+    <TaxCode>${company.taxCode}</TaxCode>
+  </Seller>
+  <InvoiceList>
 ${lines}
-  </DanhSachHoaDon>
-  <TongHop>
-    <TongDoanhThu>${totalSubtotal}</TongDoanhThu>
-    <TongTienThue>${totalVAT}</TongTienThue>
-    <TongThanhToan>${totalAmount}</TongThanhToan>
-  </TongHop>
-</BangKeHoaDon>`
+  </InvoiceList>
+  <Totals>
+    <TotalRevenue>${totalSubtotal}</TotalRevenue>
+    <TotalVAT>${totalVAT}</TotalVAT>
+    <TotalPayment>${totalAmount}</TotalPayment>
+  </Totals>
+</InvoiceSummary>`
 
     const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `BangKe_HoaDon_T${month}_${year}.xml`
+    a.download = `InvoiceSummary_M${month}_${year}.xml`
     a.click()
     URL.revokeObjectURL(url)
-    toast.success('Đã xuất file XML bảng kê hóa đơn.')
+    toast.success('XML file exported successfully.')
   }
 
   return (
@@ -634,33 +666,33 @@ ${lines}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-base font-bold text-slate-800 dark:text-slate-100">
-              BẢNG KÊ HÓA ĐƠN ĐIỆN TỬ GỬI CƠ QUAN THUẾ
+              E-INVOICE SUMMARY SUBMITTED TO TAX AUTHORITY
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Theo Nghị định 123/2020/NĐ-CP · Thông tư 78/2021/TT-BTC
+              Per Decree 123/2020/ND-CP · Circular 78/2021/TT-BTC
             </div>
             <div className="flex items-center gap-4 mt-3 text-xs text-slate-600 dark:text-slate-300">
-              <div><span className="font-semibold">Đơn vị:</span> {company.companyName}</div>
-              <div><span className="font-semibold">MST:</span> {company.taxCode}</div>
-              <div><span className="font-semibold">Kỳ:</span> {periodLabel}</div>
+              <div><span className="font-semibold">Entity:</span> {company.companyName}</div>
+              <div><span className="font-semibold">Tax ID:</span> {company.taxCode}</div>
+              <div><span className="font-semibold">Period:</span> {periodLabel}</div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <SelectBox value={month} onChange={setMonth} className="w-28"
-              options={MONTHS.map(m => ({ value: m, label: `Tháng ${m}` }))} />
+              options={MONTHS.map(m => ({ value: m, label: `Month ${m}` }))} />
             <SelectBox value={year} onChange={setYear} className="w-24"
-              options={YEARS.map(y => ({ value: y, label: `Năm ${y}` }))} />
+              options={YEARS.map(y => ({ value: y, label: y }))} />
             <Button icon={Download} size="sm" variant="secondary" onClick={handleExportXML}>
-              Xuất XML
+              Export XML
             </Button>
             <Button icon={Printer} size="sm" variant="secondary" onClick={() => window.print()}>
-              In bảng kê
+              Print
             </Button>
             <button onClick={handleSendCQT} disabled={sending || issued.length === 0}
               className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 transition-colors">
               {sending
-                ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Đang gửi...</>
-                : <><Send size={12} /> Gửi CQT</>
+                ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Sending...</>
+                : <><Send size={12} /> Submit to CQT</>
               }
             </button>
           </div>
@@ -670,9 +702,9 @@ ${lines}
       {/* Summary KPI */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: 'Số hóa đơn trong kỳ', value: issued.length + ' HĐ',   color: 'text-blue-700 dark:text-blue-300',   bg: 'bg-blue-50 dark:bg-blue-900/20' },
-          { label: 'Tổng doanh thu (trước thuế)', value: fmt(totalSubtotal), color: 'text-green-700 dark:text-green-300', bg: 'bg-green-50 dark:bg-green-900/20' },
-          { label: 'Tổng thuế GTGT phải nộp',     value: fmt(totalVAT),     color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-50 dark:bg-purple-900/20' },
+          { label: 'Invoices in Period', value: issued.length + ' inv.',   color: 'text-blue-700 dark:text-blue-300',   bg: 'bg-blue-50 dark:bg-blue-900/20' },
+          { label: 'Total Revenue (ex. VAT)', value: fmt(totalSubtotal), color: 'text-green-700 dark:text-green-300', bg: 'bg-green-50 dark:bg-green-900/20' },
+          { label: 'Total VAT Payable',       value: fmt(totalVAT),     color: 'text-purple-700 dark:text-purple-300', bg: 'bg-purple-50 dark:bg-purple-900/20' },
         ].map(c => (
           <div key={c.label} className={`${c.bg} rounded-xl px-5 py-4 border border-white/50 dark:border-slate-700/50`}>
             <div className={`text-xl font-bold ${c.color}`}>{c.value}</div>
@@ -686,13 +718,13 @@ ${lines}
         <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
           <div>
             <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              Bảng kê hóa đơn {periodLabel}
+              Invoice Summary — {periodLabel}
             </div>
-            <div className="text-xs text-slate-400 mt-0.5">{issued.length} hóa đơn đã phát hành</div>
+            <div className="text-xs text-slate-400 mt-0.5">{issued.length} issued invoices</div>
           </div>
           {issued.length > 0 && (
             <div className="flex items-center gap-1.5 text-[10px] bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 px-2.5 py-1 rounded-full font-semibold border border-green-200 dark:border-green-800">
-              <FileCheck2 size={10} /> Sẵn sàng gửi CQT
+              <FileCheck2 size={10} /> Ready to submit to CQT
             </div>
           )}
         </div>
@@ -701,20 +733,20 @@ ${lines}
             <thead>
               <tr className="bg-slate-100 dark:bg-slate-700">
                 {[
-                  { label: 'STT',               w: '40px' },
-                  { label: 'Ký hiệu mẫu',       w: '100px' },
-                  { label: 'Ký hiệu HĐ',        w: '90px' },
-                  { label: 'Số HĐ',             w: '80px' },
-                  { label: 'Ngày lập',          w: '90px' },
-                  { label: 'Tên người mua',     w: '' },
-                  { label: 'MST người mua',     w: '110px' },
-                  { label: 'Mặt hàng',          w: '180px' },
-                  { label: 'DT chưa thuế',      w: '110px' },
-                  { label: 'Thuế suất',         w: '80px' },
-                  { label: 'Tiền thuế GTGT',    w: '110px' },
-                  { label: 'Tổng TT',           w: '110px' },
-                  { label: 'Mã CQT',            w: '140px' },
-                  { label: 'Ghi chú',           w: '100px' },
+                  { label: '#',                 w: '40px' },
+                  { label: 'Form Code',         w: '100px' },
+                  { label: 'Series',            w: '90px' },
+                  { label: 'Invoice No.',       w: '80px' },
+                  { label: 'Date',              w: '90px' },
+                  { label: 'Buyer Name',        w: '' },
+                  { label: 'Buyer Tax ID',      w: '110px' },
+                  { label: 'Goods / Services',  w: '180px' },
+                  { label: 'Net Amount',        w: '110px' },
+                  { label: 'VAT Rate',          w: '80px' },
+                  { label: 'VAT Amount',        w: '110px' },
+                  { label: 'Total',             w: '110px' },
+                  { label: 'CQT Code',          w: '140px' },
+                  { label: 'Note',              w: '100px' },
                 ].map(h => (
                   <th key={h.label} style={{ width: h.w, padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #e2e8f0', whiteSpace: 'nowrap' }}
                     className="dark:text-slate-400 dark:border-slate-600">
@@ -727,44 +759,42 @@ ${lines}
               {issued.length === 0 && (
                 <tr>
                   <td colSpan={14} style={{ padding: '48px 16px', textAlign: 'center', color: '#94a3b8' }}>
-                    Không có hóa đơn đã phát hành trong {periodLabel}
+                    No issued invoices found for {periodLabel}
                   </td>
                 </tr>
               )}
-              {issuedEnriched.map((r, idx) => {
-                const sap = r._sap
-                const cellStyle = { padding: '8px 10px', verticalAlign: 'middle' }
-                const rowStyle  = { borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }
-                const itemsSummary = sap?.items?.map(i => i.description).filter(Boolean).join('; ') || '—'
-                const vatRates = sap ? [...new Set(sap.items?.map(i => i.vatRate + '%'))].join(', ') : '—'
+              {flatRows.map((row, i) => {
+                const cs  = { padding: '8px 10px', verticalAlign: 'middle' }
+                const rs  = { borderBottom: row._isFirst && row._rowCount > 1 ? 'none' : '1px solid #f1f5f9', transition: 'background 0.15s' }
+                const rsc = row._rowCount
+                const desc = row._descs.join('; ') || '—'
+                const vatLabel = row._vatRate != null ? `${row._vatRate}%` : '—'
                 return (
-                  <tr key={r.id} style={rowStyle} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
-                    <td style={cellStyle} className="text-slate-400">{idx + 1}</td>
-                    <td style={cellStyle} className="text-slate-600">{r.billing_doc_type || '—'}</td>
-                    <td style={cellStyle} className="font-mono text-blue-600 font-semibold">{r.viettel_series || '—'}</td>
-                    <td style={cellStyle} className="font-mono font-bold text-slate-800">{r.viettel_invoice_no || '—'}</td>
-                    <td style={cellStyle} className="text-slate-500 whitespace-nowrap">{r.issue_date || r.signed_at?.slice(0,10)}</td>
-                    <td style={cellStyle} className="text-slate-700">
-                      <div className="font-medium">{r.customer_name || '—'}</div>
-                      <div style={{ fontSize: 10, color: '#94a3b8' }}>{r.billing_doc}</div>
-                    </td>
-                    <td style={cellStyle} className="font-mono text-slate-500">{r.customer_tax_code || '—'}</td>
-                    <td style={{ ...cellStyle, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                      title={itemsSummary} className="text-slate-600">{itemsSummary}</td>
-                    <td style={{ ...cellStyle, textAlign: 'right' }} className="font-semibold text-slate-700 whitespace-nowrap">
-                      {fmtN(sap?.totalNetAmount || 0)}
-                    </td>
-                    <td style={{ ...cellStyle, textAlign: 'center' }} className="text-slate-500">{vatRates}</td>
-                    <td style={{ ...cellStyle, textAlign: 'right' }} className="text-purple-600 whitespace-nowrap">
-                      {fmtN(sap?.totalTaxAmount || 0)}
-                    </td>
-                    <td style={{ ...cellStyle, textAlign: 'right' }} className="font-bold text-slate-800 whitespace-nowrap">
-                      {fmtN(sap?.totalGrossAmount || r.total_amount || 0)}
-                    </td>
-                    <td style={cellStyle} className="font-mono text-[10px] text-blue-600">
-                      {r.viettel_tax_authority_code || <span className="text-slate-300 italic">—</span>}
-                    </td>
-                    <td style={cellStyle} className="text-slate-400 text-[10px]"></td>
+                  <tr key={`${row.id}-${row._vatRate}-${i}`} style={rs} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                    {row._isFirst && <td style={cs} rowSpan={rsc} className="text-slate-400 border-r border-slate-100 dark:border-slate-700">{row._invIdx + 1}</td>}
+                    {row._isFirst && <td style={cs} rowSpan={rsc} className="text-slate-600">{row.billing_doc_type || '—'}</td>}
+                    {row._isFirst && <td style={cs} rowSpan={rsc} className="font-mono text-blue-600 font-semibold">{row.viettel_series || '—'}</td>}
+                    {row._isFirst && <td style={cs} rowSpan={rsc} className="font-mono font-bold text-slate-800">{row.viettel_invoice_no || '—'}</td>}
+                    {row._isFirst && <td style={cs} rowSpan={rsc} className="text-slate-500 whitespace-nowrap">{row.issue_date || row.signed_at?.slice(0,10)}</td>}
+                    {row._isFirst && (
+                      <td style={cs} rowSpan={rsc} className="text-slate-700">
+                        <div className="font-medium">{row.customer_name || '—'}</div>
+                        <div style={{ fontSize: 10, color: '#94a3b8' }}>{row.billing_doc}</div>
+                      </td>
+                    )}
+                    {row._isFirst && <td style={cs} rowSpan={rsc} className="font-mono text-slate-500">{row.customer_tax_code || '—'}</td>}
+                    <td style={{ ...cs, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={desc} className="text-slate-600">{desc}</td>
+                    <td style={{ ...cs, textAlign: 'right' }} className="font-semibold text-slate-700 whitespace-nowrap">{fmtN(row._net)}</td>
+                    <td style={{ ...cs, textAlign: 'center' }} className="text-slate-500 font-semibold">{vatLabel}</td>
+                    <td style={{ ...cs, textAlign: 'right' }} className="text-purple-600 whitespace-nowrap">{fmtN(row._vat)}</td>
+                    <td style={{ ...cs, textAlign: 'right' }} className="font-bold text-slate-800 whitespace-nowrap">{fmtN(row._total)}</td>
+                    {row._isFirst && (
+                      <td style={cs} rowSpan={rsc} className="font-mono text-[10px] text-blue-600">
+                        {row.viettel_tax_authority_code || <span className="text-slate-300 italic">—</span>}
+                      </td>
+                    )}
+                    {row._isFirst && <td style={cs} rowSpan={rsc} className="text-slate-400 text-[10px]"></td>}
                   </tr>
                 )
               })}
@@ -775,7 +805,7 @@ ${lines}
                   className="dark:bg-blue-900/20 dark:border-blue-700">
                   <td colSpan={8} style={{ padding: '10px', textAlign: 'right', fontWeight: 700, fontSize: 12 }}
                     className="text-slate-700 dark:text-slate-200">
-                    TỔNG CỘNG
+                    TOTAL
                   </td>
                   <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, fontSize: 12 }}
                     className="text-slate-800 dark:text-slate-100 whitespace-nowrap">
@@ -802,8 +832,8 @@ ${lines}
           <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700 flex items-start gap-2">
             <Building2 size={12} className="text-slate-400 shrink-0 mt-0.5" />
             <div className="text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed">
-              Bảng kê hóa đơn điện tử gửi Cơ quan Thuế theo quy định tại Điều 22 Nghị định 123/2020/NĐ-CP.
-              Đơn vị xác nhận toàn bộ {issued.length} hóa đơn trong bảng kê trên là chính xác và đã được ký số bởi {company.companyName} (MST: {company.taxCode}).
+              E-invoice summary submitted to Tax Authority pursuant to Article 22 of Decree 123/2020/ND-CP.
+              The entity confirms that all {issued.length} invoices listed above are accurate and have been digitally signed by {company.companyName} (Tax ID: {company.taxCode}).
             </div>
           </div>
         )}
@@ -824,7 +854,7 @@ function ReportPage({ title, subtitle, children }) {
         subtitle={subtitle}
         actions={
           <Button icon={RefreshCw} size="sm" variant="secondary" onClick={fetchInvoices}>
-            Làm mới
+            Refresh
           </Button>
         }
       />
@@ -861,7 +891,7 @@ export function CQTReportPage() {
     getIssuedInvoices({}).then(setIssuedHDDT).catch(() => {})
   }, [])
   return (
-    <ReportPage title="Bảng kê gửi CQT" subtitle="Bảng kê hóa đơn điện tử gửi Cơ quan Thuế">
+    <ReportPage title="CQT Submission Report" subtitle="E-Invoice Summary Submitted to Tax Authority">
       <CQTReport invoices={invoices} issuedHDDT={issuedHDDT} />
     </ReportPage>
   )

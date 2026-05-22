@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -7,7 +7,7 @@ import {
 import {
   FileText, CheckCircle2, Clock, AlertTriangle, Zap,
   ArrowRight, RefreshCw, Wifi, WifiOff, Shield, ShieldOff,
-  Server, Activity, Send,
+  Server, Activity, XCircle, PenLine,
 } from 'lucide-react'
 import { useInvoiceStore } from '../store/invoiceStore'
 import { getIssuedInvoices } from '../services/issuedInvoiceService'
@@ -46,6 +46,7 @@ function KpiCard({ label, value, sub, icon: Icon, accent, onClick }) {
     green:  { bg: 'bg-emerald-50 dark:bg-emerald-900/20', ic: 'text-emerald-600 dark:text-emerald-400', val: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-100 dark:border-emerald-800' },
     red:    { bg: 'bg-red-50 dark:bg-red-900/20',     ic: 'text-red-600 dark:text-red-400',     val: 'text-red-700 dark:text-red-300',     border: 'border-red-200 dark:border-red-800' },
     slate:  { bg: 'bg-slate-50 dark:bg-slate-700/40', ic: 'text-slate-500 dark:text-slate-400', val: 'text-slate-700 dark:text-slate-200', border: 'border-slate-100 dark:border-slate-700' },
+    red:    { bg: 'bg-red-50 dark:bg-red-900/20',     ic: 'text-red-500 dark:text-red-400',     val: 'text-red-700 dark:text-red-300',     border: 'border-red-100 dark:border-red-800' },
   }
   const c = colors[accent] || colors.slate
   return (
@@ -95,35 +96,44 @@ export default function Dashboard() {
   const fetchInvoices = useInvoiceStore(s => s.fetchInvoices)
   const dark = useThemeStore(s => s.dark)
   const navigate = useNavigate()
+  const location = useLocation()
   const t = useT()
   const [issuedList, setIssuedList] = useState([])
-  const [lastSync] = useState(() => {
-    const d = new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-  })
+  const [lastSync, setLastSync] = useState('')
 
   useEffect(() => {
     fetchInvoices()
-    getIssuedInvoices({}).then(setIssuedList).catch(() => {})
-  }, [])
+    getIssuedInvoices({}).then(data => {
+      setIssuedList(data)
+      const d = new Date()
+      setLastSync(`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`)
+    }).catch(() => {})
+  }, [location.key])
 
-  const today      = new Date().toISOString().slice(0, 10)
-  const issuedSet  = new Set(issuedList.map(r => r.billing_doc))
+  // Replicate InvoiceList logic exactly
+  const issuedMap = new Map(issuedList.map(r => [r.billing_doc, r]))
+  const cancelledByS1 = new Set(
+    invoices.filter(i => i.billingDocType === 'S1' && i.cancelledBillingDoc).map(i => i.cancelledBillingDoc)
+  )
+  const isFullyIssued = inv => issuedMap.get(inv.sapBillingDoc)?.status === 'issued'
+  const isPending     = inv => issuedMap.get(inv.sapBillingDoc)?.status === 'signing_failed'
+  const isCancelled   = inv =>
+    inv.status === 'cancelled' ||
+    cancelledByS1.has(inv.sapBillingDoc) ||
+    issuedMap.get(inv.sapBillingDoc)?.status === 'cancelled'
 
-  // KPI derivations
-  const todayInvs   = invoices.filter(i => i.issueDate === today)
-  const todayCount  = todayInvs.length
-  const todayAmt    = todayInvs.reduce((s, i) => s + (i.totalGrossAmount || 0), 0)
-  const pendingSign = invoices.filter(i => i.status !== 'cancelled' && !issuedSet.has(i.sapBillingDoc)).length
-  const waitingCQT  = Math.floor(issuedList.length * 0.08)   // mock: 8% chờ CQT
-  const issuedCount = issuedList.filter(r => r.status !== 'cancelled').length
-  const errorCQT    = Math.floor(issuedList.length * 0.03)    // mock: 3% lỗi
+  const totalCount     = invoices.length
+  const issuedCount    = invoices.filter(i => !isCancelled(i) && isFullyIssued(i)).length
+  const notSignedCount = invoices.filter(i => !isCancelled(i) && !isFullyIssued(i) && !isPending(i) && i.billingDocType !== 'S1').length
+  const errorCQT       = invoices.filter(i => !isCancelled(i) && isPending(i)).length
+  const cancelledCount = invoices.filter(i => isCancelled(i)).length
 
   // Donut data
   const donutData = [
-    { name: 'Pending Signing',  value: pendingSign, fill: '#f59e0b' },
-    { name: 'Awaiting Tax Auth',value: waitingCQT,  fill: '#3b82f6' },
-    { name: 'Issued',           value: issuedCount, fill: '#22c55e' },
-    { name: 'CQT Error',        value: errorCQT,    fill: '#ef4444' },
+    { name: 'Chưa ký',    value: notSignedCount, fill: '#f59e0b' },
+    { name: 'Đã ký',      value: issuedCount,    fill: '#22c55e' },
+    { name: 'Ký thất bại',value: errorCQT,       fill: '#ef4444' },
+    { name: 'Đã hủy',     value: cancelledCount, fill: '#94a3b8' },
   ].filter(d => d.value > 0)
 
   const donutTotal = donutData.reduce((s, d) => s + d.value, 0)
@@ -149,44 +159,44 @@ export default function Dashboard() {
         {/* ── Row 1: KPI Cards ── */}
         <div className="grid grid-cols-5 gap-3">
           <KpiCard
-            label="Today's Invoices"
-            value={todayCount}
-            sub={todayCount > 0 ? fmtAmt(todayAmt) : 'No documents yet'}
+            label="Total Invoices"
+            value={totalCount}
+            sub="All billing documents"
             icon={FileText}
             accent="slate"
-            onClick={() => navigate('/invoices')}
-          />
-          <KpiCard
-            label="Pending Signing"
-            value={pendingSign}
-            sub="Received from SAP, not signed"
-            icon={Clock}
-            accent="amber"
-            onClick={() => navigate('/invoices')}
-          />
-          <KpiCard
-            label="Awaiting Tax Auth."
-            value={waitingCQT}
-            sub="Signed, waiting for CQT response"
-            icon={Send}
-            accent="blue"
-            onClick={() => navigate('/issued-invoices')}
+            onClick={() => navigate('/invoices', { state: { tab: '' } })}
           />
           <KpiCard
             label="Issued"
             value={issuedCount}
-            sub="Valid tax authority code"
+            sub="Successfully e-signed"
             icon={CheckCircle2}
             accent="green"
-            onClick={() => navigate('/issued-invoices')}
+            onClick={() => navigate('/invoices', { state: { tab: 'issued' } })}
           />
           <KpiCard
-            label="CQT Errors"
+            label="Pending Signing"
+            value={notSignedCount}
+            sub="Received from SAP"
+            icon={Clock}
+            accent="amber"
+            onClick={() => navigate('/invoices', { state: { tab: 'notIssued' } })}
+          />
+          <KpiCard
+            label="Signing Failed"
             value={errorCQT}
-            sub={errorCQT > 0 ? 'Requires immediate action' : 'No errors'}
+            sub={errorCQT > 0 ? 'Requires attention' : 'No errors'}
             icon={AlertTriangle}
             accent={errorCQT > 0 ? 'red' : 'slate'}
-            onClick={() => navigate('/issued-invoices')}
+            onClick={() => navigate('/invoices', { state: { tab: 'pending' } })}
+          />
+          <KpiCard
+            label="Cancelled"
+            value={cancelledCount}
+            sub="Voided invoices"
+            icon={XCircle}
+            accent="red"
+            onClick={() => navigate('/invoices', { state: { tab: 'cancelled' } })}
           />
         </div>
 
@@ -288,22 +298,22 @@ export default function Dashboard() {
             </div>
             <div className="divide-y divide-slate-50 dark:divide-slate-700/50 p-2">
               <UrgentRow
-                label="Invoices with CQT error, not retried"
+                label="Signing Failed — requires retry"
                 count={errorCQT}
                 accent="red"
-                onClick={() => navigate('/issued-invoices')}
+                onClick={() => navigate('/invoices', { state: { tab: 'pending' } })}
               />
               <UrgentRow
-                label="Invoices pending signing for over 30 minutes"
-                count={Math.max(0, pendingSign - 2)}
+                label="Pending Signing — not yet issued"
+                count={notSignedCount}
                 accent="amber"
-                onClick={() => navigate('/invoices')}
+                onClick={() => navigate('/invoices', { state: { tab: 'notIssued' } })}
               />
               <UrgentRow
-                label="Invoices with tax code, not yet sent to customer"
-                count={waitingCQT}
+                label="Cancelled invoices"
+                count={cancelledCount}
                 accent="blue"
-                onClick={() => navigate('/issued-invoices')}
+                onClick={() => navigate('/invoices', { state: { tab: 'cancelled' } })}
               />
             </div>
 
@@ -315,9 +325,30 @@ export default function Dashboard() {
                 </div>
                 <table className="w-full text-xs">
                   <tbody className="divide-y divide-slate-50 dark:divide-slate-700/40">
-                    {issuedList.slice(0, 4).map(inv => (
+                    {issuedList.slice(0, 4).map(inv => {
+                      const sapInv = invoices.find(i => i.sapBillingDoc === inv.billing_doc)
+                      const previewInv = sapInv ? { ...sapInv } : {
+                        sapBillingDoc:    inv.billing_doc,
+                        billingDocType:   inv.billing_doc_type,
+                        issueDate:        inv.issue_date,
+                        dueDate:          inv.due_date,
+                        currency:         inv.currency || 'VND',
+                        deliveryRef:      inv.delivery_ref,
+                        paymentMethod:    inv.payment_method,
+                        totalGrossAmount: inv.total_amount,
+                        customer: {
+                          name:    inv.customer_name,
+                          taxCode: inv.customer_tax_code,
+                          code:    inv.customer_code,
+                          address: inv.customer_address,
+                        },
+                        items: inv.items || [],
+                      }
+                      return (
                       <tr key={inv.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 cursor-pointer"
-                        onClick={() => navigate('/issued-invoices')}>
+                        onClick={() => navigate(`/billing-preview/${inv.billing_doc}`, {
+                          state: { inv: previewInv, issued: true, taxAuthorityCode: inv.viettel_tax_authority_code }
+                        })}>
                         <td className="px-5 py-2.5 font-mono font-semibold text-blue-600 dark:text-blue-400">{inv.billing_doc}</td>
                         <td className="px-4 py-2.5 text-slate-700 dark:text-slate-300 max-w-[180px] truncate">{inv.customer_name || '—'}</td>
                         <td className="px-4 py-2.5 text-slate-400">
@@ -327,7 +358,8 @@ export default function Dashboard() {
                           {fmtMini(inv.total_amount)} ₫
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </>

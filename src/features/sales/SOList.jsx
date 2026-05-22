@@ -4,14 +4,14 @@ import {
   Search, RefreshCw, FileText, ChevronDown, ChevronUp,
   ShoppingCart, Loader2, WifiOff, Settings, Wifi, Database, Truck,
 } from 'lucide-react'
-import { useSOStore } from '../store/soStore'
-import { calcTotals } from '../services/mockData'
-import Badge from '../components/ui/Badge'
-import Button from '../components/ui/Button'
-import EmptyState from '../components/ui/EmptyState'
-import Pagination from '../components/ui/Pagination'
-import Topbar from '../components/layout/Topbar'
-import { useT } from '../i18n'
+import { useSOStore } from '../../store/soStore'
+import { calcTotals } from '../../services/sap/mockData'
+import Badge from '../../components/ui/Badge'
+import Button from '../../components/ui/Button'
+import EmptyState from '../../components/ui/EmptyState'
+import Pagination from '../../components/ui/Pagination'
+import Topbar from '../../components/layout/Topbar'
+import { useT } from '../../i18n'
 
 // Detect SAP connection mode from env + localStorage
 function getSAPInfo() {
